@@ -1,4 +1,4 @@
-# 🌅 Morning Briefing — AI-Powered Daily Dashboard
+# 🌅 Wakeflow — AI-Powered Daily Dashboard
 
 An AI-powered morning briefing prototype built with **Streamlit** for the ESADE PDAI course.
 
