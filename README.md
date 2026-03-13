@@ -1,63 +1,63 @@
-# 🌅 Wakeflow — Your AI Morning Briefing
+# 🌅 WakeFlow — AI Morning Briefing App
 
-An AI-powered morning briefing app built with **Streamlit** for the ESADE PDAI course. Open it every morning to see your schedule, weather, and news — all in one place.
+> Your personalized morning command center — calendar, weather, news, and AI assistant in one place.
+
+WakeFlow is a Python Dash web application that consolidates everything you need to start your day. Built as part of the **PDAI (Prototyping & Deploying AI Applications)** course at ESADE Business School.
+
+---
 
 ## ✨ Features
 
-| Feature | Description | AI Component |
-|---------|-------------|--------------|
-| 📅 My Day | Daily schedule with expandable event details | ✅ AI analyzes schedule → priorities, tips & advice |
-| 💬 Ask AI | Chat with AI about your day | ✅ AI answers questions about your schedule |
-| 🌤️ Weather | Real-time weather data for any city | — (OpenWeatherMap API) |
-| 📰 News | Live news feed filtered by your interests | ✅ AI summarizes today's top stories |
+### 📅 My Day — Smart Daily Planner
+- Connects to **Google Calendar** via OAuth 2.0
+- Displays all events in an interactive **Gantt chart** with colors matching your Google Calendar
+- Click any event to get **AI-generated preparation tips** (powered by GPT-4o-mini)
+- **Google Maps integration** — see your event location on an embedded map and get directions instantly
+- Navigate to any date with the date picker
 
-## 🚀 Quick Start
+### 💬 AI Assistant — Conversational Day Planner
+- Chat with WakeFlow about your schedule, weather, or news
+- Powered by **GPT-4o-mini with Tool Calling** — the AI automatically fetches live data before answering:
+  - 📅 `get_calendar_events` — real events from Google Calendar
+  - 🌤️ `get_weather` — live weather from OpenWeatherMap
+  - 📰 `get_news` — top headlines from NewsAPI
+- Understands relative dates ("this Sunday", "tomorrow", "next Monday")
+- Maintains conversation history for multi-turn dialogue
 
-### 1. Clone the repository
-git clone https://github.com/engpongtanya-16/WakeFlow.git
-cd WakeFlow
+### 🌤️ Weather — Live Forecast
+- Real-time weather data from **OpenWeatherMap API**
+- Shows temperature, feels like, humidity, and weather condition
+- Smart outfit advice based on current conditions
+- Visual bar chart for quick weather overview
 
-### 2. Install dependencies
-pip install -r requirements.txt
+### 📰 News — Personalized Headlines
+- Live headlines from **NewsAPI**
+- Filter by topics: Tech, Finance, World, Sports, and more
+- Clean card layout with source and description
 
-### 3. Add API keys
-Create .streamlit/secrets.toml:
-WEATHER_API_KEY = "your-openweathermap-key"
-NEWS_API_KEY = "your-newsapi-key"
-OPENAI_API_KEY = "your-key-here"  (optional — for AI features)
+### 📧 Daily Email — Automated Morning Briefing
+- Sends a beautiful HTML email every morning at your chosen time
+- Email includes:
+  - Today's Google Calendar schedule
+  - Live weather for your city
+  - Top 5 news headlines
+- Powered by **APScheduler** for reliable cron-based scheduling
+- Configure your recipient email and send time from the app
 
-### 4. Run the app
-streamlit run app.py
+---
 
 ## 🛠️ Tech Stack
 
-- **Frontend:** Streamlit
-- **Weather API:** OpenWeatherMap (free tier)
-- **News API:** NewsAPI.org (free tier)
-- **AI/LLM:** OpenAI GPT-4o-mini / Anthropic Claude (optional)
-- **Deployment:** Hugging Face Spaces
+| Layer | Technology |
+|-------|------------|
+| Framework | Python Dash + Flask |
+| AI / LLM | OpenAI GPT-4o-mini (tool calling) |
+| Calendar | Google Calendar API (OAuth 2.0) |
+| Weather | OpenWeatherMap API |
+| News | NewsAPI |
+| Email | Gmail SMTP + APScheduler |
+| Charts | Plotly (Gantt, Bar) |
+| Maps | Google Maps Embed API |
+| Styling | Custom CSS, gradient background |
 
-## 📦 Streamlit Concepts Used
-
-- st.tabs() — Multi-tab layout (My Day, Weather, News)
-- st.columns() — Grid layout for weather metrics
-- st.sidebar — City selection and news topic preferences
-- st.session_state — Persist AI responses and chat history
-- @st.cache_data — Cache weather and news API calls
-- st.metric() — Weather data display
-- st.expander() — Expandable event details and news articles
-- st.date_input() — Date picker for schedule
-- st.chat_input() / st.chat_message() — Chat with AI assistant
-- st.spinner() — Loading indicators
-- config.toml — Custom sunrise theme
-
-## 🔮 Future Improvements (v2)
-
-- Google Calendar API integration (currently mock data)
-- AI Outfit Advisor based on weather
-- Habit Tracker with AI coaching
-- Spotify integration for mood-based playlists
-
-## 👤 Author
-
-Eng — ESADE MIBA24 | PDAI Course Prototype
+---
