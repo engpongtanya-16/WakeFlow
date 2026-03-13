@@ -2,7 +2,7 @@
 
 > Your personalized morning command center — calendar, weather, news, and AI assistant in one place.
 
-WakeFlow is a Python Dash web application that consolidates everything you need to start your day. Built as part of the **PDAI (Prototyping & Deploying AI Applications)** course at ESADE Business School.
+WakeFlow is a Python Dash web application that consolidates everything you need to start your day.
 
 ---
 
