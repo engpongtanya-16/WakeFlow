@@ -40,6 +40,12 @@ TOKEN_FILE          = os.path.join(_APP_DIR, "google_token.json")
 CLIENT_SECRETS_FILE = os.path.join(_APP_DIR, "credentials.json")
 FEEDBACK_FILE       = os.path.join(_APP_DIR, "feedback.json")
 
+# Write credentials.json from env var if not exists
+_creds_env = os.getenv("GOOGLE_CREDENTIALS", "")
+if _creds_env and not os.path.exists(CLIENT_SECRETS_FILE):
+    with open(CLIENT_SECRETS_FILE, "w") as f:
+        f.write(_creds_env)
+
 # Updated scopes — users must re-authenticate (delete google_token.json)
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
