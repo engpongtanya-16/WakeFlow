@@ -635,7 +635,7 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
             type="date",
             showgrid=True, gridcolor="rgba(0,0,0,0.06)",
             title="", tickformat="%H:%M", color="#4b5563",
-            range=[f"{base} 08:00", f"{base} 17:00"],
+            range=[f"{base} 00:00", f"{base} 23:59"],
             fixedrange=False,
         ),
         yaxis=dict(showgrid=False, title="", autorange="reversed",
