@@ -19,7 +19,8 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dcc, html, no_update, ctx
 
 load_dotenv()
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+if not os.getenv("REDIRECT_URI", "").startswith("https"):
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 REDIRECT_URI = os.getenv("REDIRECT_URI", "http://localhost:8050/oauth2callback")
 
@@ -836,7 +837,8 @@ def oauth2callback():
             CLIENT_SECRETS_FILE, scopes=GOOGLE_SCOPES,
             redirect_uri=REDIRECT_URI,
         )
-    flow.fetch_token(authorization_response=freq.url)
+    callback_url = freq.url.replace("http://", "https://") if REDIRECT_URI.startswith("https") else freq.url
+    flow.fetch_token(authorization_response=callback_url)
     with open(TOKEN_FILE, "w") as f:
         f.write(flow.credentials.to_json())
     return "<script>window.location.href='/'</script>"
