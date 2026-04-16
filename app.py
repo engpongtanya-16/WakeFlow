@@ -1747,4 +1747,5 @@ def cb_add_all_events(n, events):
 
 
 if __name__ == "__main__":
-    app.run(debug=False, port=8050)
+    port = int(os.environ.get("PORT", 8050))
+    app.run(debug=False, host="0.0.0.0", port=port)
