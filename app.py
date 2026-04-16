@@ -586,37 +586,36 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
                            xref="paper", yref="paper")
         return fig
 
-    base = date_str or datetime.now().strftime("%Y-%m-%d")
-    rows = []
-    for e in events:
-        color = e.get("color") or TYPE_COLORS.get(e["type"].capitalize(), "#60a5fa")
-        rows.append({
-            "Event":     e["title"],
-            "Start":     f"{base} {e['time']}",
-            "Finish":    f"{base} {e['end']}",
-            "Color":     color,
-            "Calendar":  e.get("calendar", e["type"].capitalize()),
-            "Location":  e.get("location", "—"),
-            "TimeLabel": f"{e['time']} – {e['end']}",
-        })
-    df = pd.DataFrame(rows)
+    def t2h(t):
+        """Convert HH:MM to float hours."""
+        try:
+            h, m = map(int, t.split(":"))
+            return h + m / 60
+        except Exception:
+            return 0.0
 
     fig = go.Figure()
     seen_legends = set()
-    for _, row in df.iterrows():
-        show_legend = row["Calendar"] not in seen_legends
-        seen_legends.add(row["Calendar"])
+    for e in events:
+        color    = e.get("color") or TYPE_COLORS.get(e["type"].capitalize(), "#60a5fa")
+        calendar = e.get("calendar", e["type"].capitalize())
+        s        = t2h(e["time"])
+        f        = t2h(e["end"])
+        if f <= s:
+            f = s + 0.5   # fallback: 30-min block
+        show_legend = calendar not in seen_legends
+        seen_legends.add(calendar)
         fig.add_trace(go.Bar(
-            x=[ (pd.Timestamp(row["Finish"]) - pd.Timestamp(row["Start"])).total_seconds() * 1000 ],
-            y=[ row["Calendar"] ],
-            base=[ row["Start"] ],
+            x=[f - s],
+            y=[calendar],
+            base=[s],
             orientation="h",
-            marker_color=row["Color"],
+            marker_color=color,
             marker_line_width=0,
             opacity=0.88,
-            name=row["Calendar"],
+            name=calendar,
             showlegend=show_legend,
-            customdata=[[row["Event"], row["TimeLabel"], row["Calendar"], row["Location"]]],
+            customdata=[[e["title"], f"{e['time']} – {e['end']}", calendar, e.get("location","—")]],
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
                 "%{customdata[1]}<br>"
@@ -624,6 +623,11 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
                 "📍 %{customdata[3]}<extra></extra>"
             ),
         ))
+
+    # Hourly tick labels 00:00 → 23:00
+    tick_vals  = list(range(0, 24))
+    tick_texts = [f"{h:02d}:00" for h in tick_vals]
+
     fig.update_layout(
         plot_bgcolor="rgba(255,255,255,0.35)", paper_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#1e293b", size=12, family="DM Sans, sans-serif"),
@@ -632,12 +636,11 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
         margin=dict(l=8,r=8,t=32,b=8),
         barmode="overlay",
         xaxis=dict(
-            type="date",
+            range=[0, 24],
+            tickvals=tick_vals,
+            ticktext=tick_texts,
             showgrid=True, gridcolor="rgba(0,0,0,0.06)",
-            title="", tickformat="%H:%M", color="#4b5563",
-            range=[f"{base}T00:00:00", f"{base}T23:59:59"],
-            dtick=7200000,
-            tick0=f"{base}T00:00:00",
+            title="", color="#4b5563",
             fixedrange=False,
         ),
         yaxis=dict(
