@@ -624,8 +624,8 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
             ),
         ))
 
-    # Hourly tick labels 00:00 → 23:00
-    tick_vals  = list(range(0, 24))
+    # Tick ทุก 2 ชั่วโมง
+    tick_vals  = list(range(0, 25, 2))
     tick_texts = [f"{h:02d}:00" for h in tick_vals]
 
     fig.update_layout(
@@ -642,6 +642,8 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
             showgrid=True, gridcolor="rgba(0,0,0,0.06)",
             title="", color="#4b5563",
             fixedrange=False,
+            minallowed=0,    # ← ห้ามเลื่อนเกิน 00:00
+            maxallowed=24,   # ← ห้ามเลื่อนเกิน 24:00
         ),
         yaxis=dict(
             showgrid=False, title="", autorange="reversed",
