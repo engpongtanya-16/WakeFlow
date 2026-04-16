@@ -21,6 +21,8 @@ from dash import Input, Output, State, callback, dcc, html, no_update, ctx
 load_dotenv()
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
+REDIRECT_URI = os.getenv("REDIRECT_URI", "http://localhost:8050/oauth2callback")
+
 _oauth_flows = {}
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -814,7 +816,7 @@ def connect_google():
     email_hint = freq.args.get("email", "")
     flow = Flow.from_client_secrets_file(
         CLIENT_SECRETS_FILE, scopes=GOOGLE_SCOPES,
-        redirect_uri="http://localhost:8050/oauth2callback",
+        redirect_uri=REDIRECT_URI,
     )
     extra = {"prompt": "consent"}
     if email_hint:
@@ -832,7 +834,7 @@ def oauth2callback():
     if flow is None:
         flow = Flow.from_client_secrets_file(
             CLIENT_SECRETS_FILE, scopes=GOOGLE_SCOPES,
-            redirect_uri="http://localhost:8050/oauth2callback",
+            redirect_uri=REDIRECT_URI,
         )
     flow.fetch_token(authorization_response=freq.url)
     with open(TOKEN_FILE, "w") as f:
