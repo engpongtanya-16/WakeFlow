@@ -18,3 +18,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+credentials.json
+google_token.json
+feedback.json
