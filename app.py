@@ -636,14 +636,14 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
         margin=dict(l=8,r=8,t=32,b=8),
         barmode="overlay",
         xaxis=dict(
-            range=[0, 24],
+            range=[0, 12],
             tickvals=tick_vals,
             ticktext=tick_texts,
             showgrid=True, gridcolor="rgba(0,0,0,0.06)",
             title="", color="#4b5563",
             fixedrange=False,
-            minallowed=0,    # ← ห้ามเลื่อนเกิน 00:00
-            maxallowed=24,   # ← ห้ามเลื่อนเกิน 24:00
+            minallowed=0,
+            maxallowed=24,
         ),
         yaxis=dict(
             showgrid=False, title="", autorange="reversed",
@@ -927,7 +927,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                                  style={"fontWeight":"600","fontSize":"15px","color":"#1e293b"}),
                     ]),
                     dcc.Loading(type="circle", color="#f97316",
-                                children=dcc.Graph(id="gantt-chart", config={"displayModeBar":False})),
+                                children=dcc.Graph(id="gantt-chart", config={"displayModeBar":False,"scrollZoom":False,"doubleClick":False})),
                     html.P("👆 Click any event bar to get AI tips + see location on map",
                            className="wf-hint mt-1"),
                 ]),
