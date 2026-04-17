@@ -16,7 +16,7 @@ import dash
 import dash_bootstrap_components as dbc
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html, no_update, ctx
+from dash import Input, Output, State, callback, dcc, html, no_update, ctx, Patch
 
 load_dotenv()
 if not os.getenv("REDIRECT_URI", "").startswith("https"):
@@ -1487,6 +1487,31 @@ def cb_vote(up_clicks, down_clicks, history):
     total = fb["thumbs_up"] + fb["thumbs_down"]
     stats = f"👍 {fb['thumbs_up']} · 👎 {fb['thumbs_down']}" if total > 0 else ""
     return status, stats
+
+
+@callback(
+    Output("gantt-chart", "figure", allow_duplicate=True),
+    Input("gantt-chart",  "relayoutData"),
+    prevent_initial_call=True,
+)
+def cb_fix_gantt_range(relayout):
+    if not relayout:
+        return no_update
+    x0 = relayout.get("xaxis.range[0]")
+    x1 = relayout.get("xaxis.range[1]")
+    if x0 is None or x1 is None:
+        return no_update
+    x0, x1 = float(x0), float(x1)
+    if abs((x1 - x0) - 12) < 0.05:
+        return no_update
+    # บังคับให้กว้าง 12 ชั่วโมงเสมอ
+    if x0 + 12 > 24:
+        x0, x1 = 12.0, 24.0
+    else:
+        x1 = x0 + 12
+    p = Patch()
+    p["layout"]["xaxis"]["range"] = [x0, x1]
+    return p
 
 
 @callback(
