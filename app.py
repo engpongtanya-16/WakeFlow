@@ -772,6 +772,87 @@ def build_week_gantt(events_by_date: dict, start_date_str: str) -> go.Figure:
     return fig
 
 
+def build_month_calendar_html(events_by_date: dict, year: int, month: int):
+    import calendar as cal_mod
+    weeks      = cal_mod.monthcalendar(year, month)
+    month_name = datetime(year, month, 1).strftime("%B %Y")
+    today      = datetime.now().date()
+
+    header = html.Tr([
+        html.Th(d, style={
+            "textAlign":"center","padding":"8px 4px","fontSize":"11px",
+            "fontWeight":"600","color":"#64748b",
+            "borderBottom":"2px solid #e2e8f0","background":"#f8fafc",
+        }) for d in ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+    ])
+
+    rows = [header]
+    for week in weeks:
+        cells = []
+        for day_num in week:
+            if day_num == 0:
+                cells.append(html.Td(style={
+                    "background":"#f8fafc","border":"1px solid #e2e8f0",
+                    "minHeight":"80px","width":"14.28%",
+                }))
+            else:
+                d          = datetime(year, month, day_num)
+                date_str   = d.strftime("%Y-%m-%d")
+                evs        = events_by_date.get(date_str, [])
+                is_today   = d.date() == today
+                is_weekend = d.weekday() >= 5
+
+                pills = []
+                for ev in evs[:3]:
+                    title = ev["title"]
+                    pills.append(html.Div(
+                        (title[:18] + "…") if len(title) > 18 else title,
+                        style={
+                            "background":ev.get("color","#60a5fa"),
+                            "color":"white","fontSize":"10px",
+                            "padding":"1px 5px","borderRadius":"3px",
+                            "marginTop":"2px","overflow":"hidden",
+                            "whiteSpace":"nowrap","textOverflow":"ellipsis",
+                        }
+                    ))
+                if len(evs) > 3:
+                    pills.append(html.Div(
+                        f"+{len(evs)-3} more",
+                        style={"fontSize":"10px","color":"#94a3b8","marginTop":"2px"}
+                    ))
+
+                cell_bg = "#fff7ed" if is_today else ("#f8fafc" if is_weekend else "white")
+                day_col = "#f97316" if is_today else ("#94a3b8" if is_weekend else "#1e293b")
+                border  = "2px solid #f97316" if is_today else "1px solid #e2e8f0"
+
+                cells.append(html.Td(
+                    [html.Div(str(day_num), style={
+                        "fontWeight":"700","fontSize":"13px",
+                        "color":day_col,"marginBottom":"2px",
+                    }), *pills],
+                    style={
+                        "verticalAlign":"top","padding":"6px 8px",
+                        "border":border,"background":cell_bg,
+                        "minHeight":"80px","width":"14.28%",
+                    }
+                ))
+        rows.append(html.Tr(cells))
+
+    return html.Div([
+        html.H6(month_name, style={
+            "fontWeight":"600","color":"#1e293b",
+            "marginBottom":"12px","fontSize":"15px",
+        }),
+        html.Table(rows, style={
+            "width":"100%","borderCollapse":"collapse",
+            "background":"white","borderRadius":"8px","overflow":"hidden",
+        }),
+    ], style={
+        "background":"white","borderRadius":"10px",
+        "padding":"16px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+    })
+
+
 def build_month_chart(events_by_date: dict, year: int, month: int) -> go.Figure:
     import calendar as cal_mod
     days_in_month = cal_mod.monthrange(year, month)[1]
@@ -1095,8 +1176,11 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         html.Div(id="selected-date-label",
                                  style={"fontWeight":"600","fontSize":"15px","color":"#1e293b"}),
                     ]),
-                    dcc.Loading(type="circle", color="#f97316",
-                                children=dcc.Graph(id="gantt-chart", config={"displayModeBar":False,"scrollZoom":False,"doubleClick":False})),
+                    dcc.Loading(type="circle", color="#f97316", children=[
+                        dcc.Graph(id="gantt-chart",
+                                  config={"displayModeBar":False,"scrollZoom":False,"doubleClick":False}),
+                        html.Div(id="month-calendar", style={"display":"none"}),
+                    ]),
                     html.P("👆 Click any event bar to get AI tips + see location on map",
                            className="wf-hint mt-1"),
                 ]),
@@ -1291,6 +1375,9 @@ def cb_view_toggle(d, w, m):
 
 @callback(
     Output("gantt-chart",    "figure"),
+    Output("gantt-chart",    "style"),
+    Output("month-calendar", "children"),
+    Output("month-calendar", "style"),
     Output("events-store",   "data"),
     Input("date-picker",     "date"),
     Input("view-mode-store", "data"),
@@ -1302,17 +1389,19 @@ def cb_update_gantt(selected_date, view_mode):
 
     if view_mode == "day":
         events = get_calendar_events(date_str)
-        return build_gantt(events, date_str), events
+        return (build_gantt(events, date_str), {"display":"block"},
+                no_update, {"display":"none"}, events)
 
     elif view_mode == "week":
         d      = datetime.fromisoformat(date_str)
         monday = d - timedelta(days=d.weekday())
         sunday = monday + timedelta(days=6)
-        events_by_date = get_calendar_events_range(
+        ebd    = get_calendar_events_range(
             monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
         )
-        all_events = [e for evs in events_by_date.values() for e in evs]
-        return build_week_gantt(events_by_date, monday.strftime("%Y-%m-%d")), all_events
+        all_events = [e for evs in ebd.values() for e in evs]
+        return (build_week_gantt(ebd, monday.strftime("%Y-%m-%d")), {"display":"block"},
+                no_update, {"display":"none"}, all_events)
 
     else:  # month
         import calendar as cal_mod
@@ -1320,9 +1409,11 @@ def cb_update_gantt(selected_date, view_mode):
         days_in_month = cal_mod.monthrange(d.year, d.month)[1]
         start_str     = d.replace(day=1).strftime("%Y-%m-%d")
         end_str       = d.replace(day=days_in_month).strftime("%Y-%m-%d")
-        events_by_date = get_calendar_events_range(start_str, end_str)
-        all_events = [e for evs in events_by_date.values() for e in evs]
-        return build_month_chart(events_by_date, d.year, d.month), all_events
+        ebd           = get_calendar_events_range(start_str, end_str)
+        all_events    = [e for evs in ebd.values() for e in evs]
+        cal_html      = build_month_calendar_html(ebd, d.year, d.month)
+        return (go.Figure(), {"display":"none"},
+                cal_html, {"display":"block"}, all_events)
 
 
 @callback(
