@@ -655,6 +655,166 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
     return fig
 
 
+def get_calendar_events_range(start_date_str: str, end_date_str: str) -> dict:
+    """Fetch events for a date range in ONE API call. Returns {date_str: [events]}"""
+    from datetime import timedelta
+    start = datetime.fromisoformat(start_date_str)
+    end   = datetime.fromisoformat(end_date_str)
+    result = {}
+    cur = start
+    while cur <= end:
+        result[cur.strftime("%Y-%m-%d")] = []
+        cur += timedelta(days=1)
+
+    if not (GOOGLE_AVAILABLE and os.path.exists(TOKEN_FILE)):
+        return result
+    try:
+        import pytz
+        local_tz = pytz.timezone("Europe/Madrid")
+        tmin = local_tz.localize(start.replace(hour=0,  minute=0,  second=0)).isoformat()
+        tmax = local_tz.localize(end.replace(  hour=23, minute=59, second=59)).isoformat()
+        creds   = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        service = gapi_build("calendar","v3",credentials=creds)
+        cal_list = service.calendarList().list().execute()
+        seen_ids = set()
+        GCAL_COLORS = {
+            "1":"#7986cb","2":"#33b679","3":"#8e24aa","4":"#e67c73",
+            "5":"#f6c026","6":"#f5511d","7":"#039be5","8":"#616161",
+            "9":"#3f51b5","10":"#0b8043","11":"#d60000",
+        }
+        for cal in cal_list.get("items", []):
+            try:
+                cal_color = cal.get("backgroundColor","") or GCAL_COLORS.get(cal.get("colorId",""),"#60a5fa")
+                res = service.events().list(
+                    calendarId=cal["id"], timeMin=tmin, timeMax=tmax,
+                    singleEvents=True, orderBy="startTime", maxResults=200,
+                ).execute()
+                for item in res.get("items", []):
+                    if item["id"] in seen_ids: continue
+                    seen_ids.add(item["id"])
+                    s     = item["start"].get("dateTime", item["start"].get("date",""))
+                    e_end = item["end"].get("dateTime",   item["end"].get("date",""))
+                    if "T" in s:
+                        event_date = s[:10]; t_start = s[11:16]
+                        t_end = e_end[11:16] if "T" in e_end else "23:59"
+                    else:
+                        event_date = s; t_start = "00:00"; t_end = "23:59"
+                    if event_date not in result: continue
+                    ev_color  = GCAL_COLORS.get(item.get("colorId",""), cal_color)
+                    desc_text = item.get("description","") or ""
+                    hang_link = item.get("hangoutLink","")
+                    zoom_m    = re.search(r'https://[^\s<>"]*zoom\.us/j/[^\s<>"&]*', desc_text)
+                    meet_link = hang_link or (zoom_m.group(0).rstrip(".,;") if zoom_m else "")
+                    result[event_date].append({
+                        "time":t_start,"end":t_end,
+                        "title":item.get("summary","Untitled"),
+                        "type":"meeting","color":ev_color,
+                        "calendar":cal.get("summary",""),
+                        "location":item.get("location",""),
+                        "notes":desc_text,"meet_link":meet_link,
+                    })
+            except Exception: continue
+        for k in result: result[k].sort(key=lambda e: e["time"])
+    except Exception: pass
+    return result
+
+
+def build_week_gantt(events_by_date: dict, start_date_str: str) -> go.Figure:
+    from datetime import timedelta
+    start      = datetime.fromisoformat(start_date_str)
+    day_labels = [(start + timedelta(days=i)).strftime("%a %d %b") for i in range(7)]
+
+    def t2h(t):
+        try:
+            h, m = map(int, t.split(":"))
+            return h + m/60
+        except Exception: return 0.0
+
+    fig = go.Figure()
+    has_events = False
+    for date_str, events in events_by_date.items():
+        d     = datetime.fromisoformat(date_str)
+        label = d.strftime("%a %d %b")
+        for e in events:
+            has_events = True
+            color = e.get("color") or "#60a5fa"
+            s = t2h(e["time"]); f = t2h(e["end"])
+            if f <= s: f = s + 0.5
+            fig.add_trace(go.Bar(
+                x=[f-s], y=[label], base=[s], orientation="h",
+                marker_color=color, marker_line_width=0, opacity=0.88,
+                name=e.get("calendar",""), showlegend=False,
+                customdata=[[e["title"], f"{e['time']} – {e['end']}", e.get("calendar",""), e.get("location","—")]],
+                hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<br>📅 %{customdata[2]}<br>📍 %{customdata[3]}<extra></extra>",
+            ))
+
+    if not has_events:
+        fig.add_annotation(text="No events this week.", x=0.5, y=0.5, showarrow=False,
+                           font=dict(color="#475569",size=14), xref="paper", yref="paper")
+        fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                          xaxis=dict(visible=False), yaxis=dict(visible=False),
+                          margin=dict(l=8,r=8,t=8,b=8), height=380)
+        return fig
+
+    tick_vals  = list(range(0, 25, 2))
+    tick_texts = [f"{h:02d}:00" for h in tick_vals]
+    fig.update_layout(
+        plot_bgcolor="rgba(255,255,255,0.35)", paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#1e293b", size=12, family="DM Sans, sans-serif"),
+        margin=dict(l=8,r=8,t=32,b=8), barmode="overlay",
+        xaxis=dict(range=[0,24], tickvals=tick_vals, ticktext=tick_texts,
+                   showgrid=True, gridcolor="rgba(0,0,0,0.06)", color="#4b5563", fixedrange=False),
+        yaxis=dict(showgrid=False, title="",
+                   categoryorder="array", categoryarray=list(reversed(day_labels)),
+                   tickfont=dict(color="#1e293b"), fixedrange=True),
+        height=380, clickmode="event+select", dragmode="pan",
+    )
+    return fig
+
+
+def build_month_chart(events_by_date: dict, year: int, month: int) -> go.Figure:
+    import calendar as cal_mod
+    days_in_month = cal_mod.monthrange(year, month)[1]
+    day_colors = {0:"#60a5fa",1:"#34d399",2:"#f97316",3:"#a78bfa",4:"#f43f5e",5:"#fbbf24",6:"#94a3b8"}
+    dates, counts, hover_texts, colors_list = [], [], [], []
+    for day_num in range(1, days_in_month+1):
+        d        = datetime(year, month, day_num)
+        date_str = d.strftime("%Y-%m-%d")
+        evs      = events_by_date.get(date_str, [])
+        titles   = ", ".join(e["title"] for e in evs[:3])
+        if len(evs) > 3: titles += f" +{len(evs)-3} more"
+        dates.append(f"{d.strftime('%d')}<br>{d.strftime('%a')}")
+        counts.append(len(evs))
+        hover_texts.append(titles or "No events")
+        colors_list.append(day_colors[d.weekday()])
+
+    if all(c == 0 for c in counts):
+        fig = go.Figure()
+        fig.add_annotation(text="No events this month.", x=0.5, y=0.5, showarrow=False,
+                           font=dict(color="#475569",size=14), xref="paper", yref="paper")
+        fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                          xaxis=dict(visible=False), yaxis=dict(visible=False),
+                          margin=dict(l=8,r=8,t=8,b=8), height=300)
+        return fig
+
+    fig = go.Figure(go.Bar(
+        x=dates, y=counts, marker_color=colors_list,
+        text=[str(c) if c > 0 else "" for c in counts], textposition="outside",
+        customdata=hover_texts,
+        hovertemplate="<b>%{x}</b><br>%{y} event(s)<br>%{customdata}<extra></extra>",
+    ))
+    fig.update_layout(
+        plot_bgcolor="rgba(255,255,255,0.35)", paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#1e293b", size=11, family="DM Sans, sans-serif"),
+        margin=dict(l=8,r=8,t=32,b=8),
+        xaxis=dict(showgrid=False, title="", color="#4b5563", tickfont=dict(size=10)),
+        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.06)",
+                   title="Events", dtick=1, color="#4b5563"),
+        height=340, bargap=0.2,
+    )
+    return fig
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # EMAIL BRIEFING
 # ─────────────────────────────────────────────────────────────────────────────
@@ -886,6 +1046,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
     dcc.Store(id="city-store",             data="Barcelona"),
     dcc.Store(id="email-settings",         data={}),
     dcc.Store(id="extracted-events-store", data=[]),
+    dcc.Store(id="view-mode-store",        data="day"),
     dcc.Store(id="pending-upload",         data=None),
 
     # Header
@@ -918,7 +1079,15 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         dbc.Tab(tab_id="tab-day", label="📅 My Day", children=[
             dbc.Row(className="mt-3 g-3", children=[
                 dbc.Col(width=8, children=[
-                    html.Div(className="d-flex align-items-center gap-3 mb-3", children=[
+                    html.Div(className="d-flex align-items-center gap-3 mb-3 flex-wrap", children=[
+                        dbc.ButtonGroup([
+                            dbc.Button("Day",   id="btn-view-day",   size="sm", n_clicks=0,
+                                       color="warning"),
+                            dbc.Button("Week",  id="btn-view-week",  size="sm", n_clicks=0,
+                                       color="light"),
+                            dbc.Button("Month", id="btn-view-month", size="sm", n_clicks=0,
+                                       color="light"),
+                        ]),
                         dcc.DatePickerSingle(
                             id="date-picker", date=datetime.now().date(),
                             display_format="D MMM YYYY", className="wf-datepicker",
@@ -1104,14 +1273,56 @@ def cb_date_label(selected_date):
 
 
 @callback(
-    Output("gantt-chart",  "figure"),
-    Output("events-store", "data"),
-    Input("date-picker",   "date"),
+    Output("view-mode-store", "data"),
+    Output("btn-view-day",   "color"),
+    Output("btn-view-week",  "color"),
+    Output("btn-view-month", "color"),
+    Input("btn-view-day",    "n_clicks"),
+    Input("btn-view-week",   "n_clicks"),
+    Input("btn-view-month",  "n_clicks"),
+    prevent_initial_call=True,
 )
-def cb_update_gantt(selected_date):
-    date_str = str(selected_date) if selected_date else datetime.now().strftime("%Y-%m-%d")
-    events   = get_calendar_events(date_str)
-    return build_gantt(events, date_str), events
+def cb_view_toggle(d, w, m):
+    mode = {"btn-view-day":"day","btn-view-week":"week","btn-view-month":"month"}.get(ctx.triggered_id,"day")
+    colors = {"day":("warning","light","light"),"week":("light","warning","light"),"month":("light","light","warning")}
+    c = colors[mode]
+    return mode, c[0], c[1], c[2]
+
+
+@callback(
+    Output("gantt-chart",    "figure"),
+    Output("events-store",   "data"),
+    Input("date-picker",     "date"),
+    Input("view-mode-store", "data"),
+)
+def cb_update_gantt(selected_date, view_mode):
+    from datetime import timedelta
+    date_str  = str(selected_date) if selected_date else datetime.now().strftime("%Y-%m-%d")
+    view_mode = view_mode or "day"
+
+    if view_mode == "day":
+        events = get_calendar_events(date_str)
+        return build_gantt(events, date_str), events
+
+    elif view_mode == "week":
+        d      = datetime.fromisoformat(date_str)
+        monday = d - timedelta(days=d.weekday())
+        sunday = monday + timedelta(days=6)
+        events_by_date = get_calendar_events_range(
+            monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
+        )
+        all_events = [e for evs in events_by_date.values() for e in evs]
+        return build_week_gantt(events_by_date, monday.strftime("%Y-%m-%d")), all_events
+
+    else:  # month
+        import calendar as cal_mod
+        d             = datetime.fromisoformat(date_str)
+        days_in_month = cal_mod.monthrange(d.year, d.month)[1]
+        start_str     = d.replace(day=1).strftime("%Y-%m-%d")
+        end_str       = d.replace(day=days_in_month).strftime("%Y-%m-%d")
+        events_by_date = get_calendar_events_range(start_str, end_str)
+        all_events = [e for evs in events_by_date.values() for e in evs]
+        return build_month_chart(events_by_date, d.year, d.month), all_events
 
 
 @callback(
