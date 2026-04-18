@@ -629,7 +629,7 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
     tick_texts = [f"{h:02d}:00" for h in tick_vals]
 
     fig.update_layout(
-        plot_bgcolor="rgba(255,255,255,0.35)", paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="white", paper_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#1e293b", size=12, family="DM Sans, sans-serif"),
         legend=dict(orientation="h", y=1.1, bgcolor="rgba(255,255,255,0.0)",
                     font=dict(color="#1e293b")),
@@ -731,23 +731,43 @@ DAY_COLORS = {
 
 def build_week_html(events_by_date: dict, start_date_str: str):
     from datetime import timedelta
+    import math
     monday = datetime.fromisoformat(start_date_str)
     days   = [monday + timedelta(days=i) for i in range(7)]
     today  = datetime.now().date()
 
-    ev_map = {}
+    def parse_h(t):
+        try:
+            h, m = map(int, t.split(":"))
+            return h, h + m/60
+        except Exception:
+            return 0, 0.0
+
+    day_events = {}
     for i, d in enumerate(days):
-        date_str = d.strftime("%Y-%m-%d")
-        for ev in events_by_date.get(date_str, []):
-            try:
-                hour = int(ev["time"].split(":")[0])
-            except Exception:
-                hour = 0
-            ev_map.setdefault((i, hour), []).append(ev)
+        evs = events_by_date.get(d.strftime("%Y-%m-%d"), [])
+        processed = []
+        for ev in evs:
+            sh, sf = parse_h(ev["time"])
+            eh, ef = parse_h(ev.get("end",""))
+            if ef <= sf: ef = sf + 0.5
+            processed.append({**ev, "sh": sh, "sf": sf, "ef": ef,
+                               "span": max(1, math.ceil(ef - sf))})
+        day_events[i] = sorted(processed, key=lambda e: e["sf"])
+
+    occupied = set()
+    starts   = {}
+    for i, evs in day_events.items():
+        for ev in evs:
+            key = (i, ev["sh"])
+            if key not in starts:
+                starts[key] = ev
+                for h in range(ev["sh"]+1, ev["sh"]+ev["span"]):
+                    occupied.add((i, h))
 
     day_labels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
     header_cells = [html.Th("", style={
-        "width":"48px","background":"#f8fafc",
+        "width":"55px","background":"#f8fafc",
         "border":"1px solid #e2e8f0","padding":"8px 4px",
     })]
     for i, d in enumerate(days):
@@ -760,53 +780,66 @@ def build_week_html(events_by_date: dict, start_date_str: str):
             ]),
             style={
                 "background": "#f97316" if is_today else c["bg"],
-                "color":      "white",
-                "textAlign":  "center",
-                "padding":    "8px 4px",
-                "border":     "1px solid #e2e8f0",
-                "minWidth":   "80px",
+                "color":"white","textAlign":"center",
+                "padding":"10px 4px","border":"1px solid #e2e8f0",
+                "minWidth":"110px",
             }
         ))
 
     rows = [html.Tr(header_cells)]
     for hour in range(24):
-        time_label = f"{hour:02d}:00"
-        cells = [html.Td(time_label, style={
+        cells = [html.Td(f"{hour:02d}:00", style={
             "fontSize":"10px","color":"#94a3b8","textAlign":"right",
             "padding":"2px 6px","verticalAlign":"top","whiteSpace":"nowrap",
-            "border":"1px solid #e2e8f0","background":"#f8fafc","fontWeight":"500",
+            "border":"1px solid #f1f5f9","background":"#f8fafc",
+            "fontWeight":"500","width":"55px",
         })]
+
         for i in range(7):
-            c    = DAY_COLORS[i]
-            evs  = ev_map.get((i, hour), [])
-            pills = []
-            for ev in evs:
-                t_end   = ev.get("end","")
-                t_label = f"{ev['time']}–{t_end}" if t_end else ev["time"]
-                title   = ev["title"]
-                pills.append(html.Div([
-                    html.Div(t_label, style={"fontSize":"9px","opacity":"0.85","lineHeight":"1"}),
+            if (i, hour) in occupied:
+                continue
+
+            c  = DAY_COLORS[i]
+            ev = starts.get((i, hour))
+
+            if ev:
+                span  = ev["span"]
+                t_lbl = f"{ev['time']}–{ev.get('end','')}"
+                title = ev["title"]
+                pill_h = span * 28 - 4
+
+                cell_content = html.Div([
+                    html.Div(t_lbl, style={"fontSize":"9px","opacity":"0.9","lineHeight":"1"}),
                     html.Div(
-                        (title[:16]+"…") if len(title)>16 else title,
-                        style={"fontSize":"10px","fontWeight":"600","lineHeight":"1.2","marginTop":"1px"}
+                        (title[:22]+"…") if len(title)>22 else title,
+                        style={"fontSize":"11px","fontWeight":"600",
+                               "lineHeight":"1.3","marginTop":"2px"},
                     ),
                 ], style={
-                    "background":  ev.get("color") or c["bg"],
-                    "color":       "white",
-                    "borderRadius":"3px",
-                    "padding":     "2px 4px",
-                    "marginBottom":"2px",
-                    "cursor":      "default",
+                    "background": ev.get("color") or c["bg"],
+                    "color":"white","borderRadius":"4px",
+                    "padding":"4px 6px",
+                    "minHeight":f"{pill_h}px",
+                    "boxSizing":"border-box",
+                })
+
+                cells.append(html.Td(
+                    cell_content,
+                    rowSpan=span,
+                    style={
+                        "verticalAlign":"top","padding":"2px",
+                        "border":"1px solid #e2e8f0",
+                        "background": c["light"],
+                        "minWidth":"110px",
+                    }
+                ))
+            else:
+                cells.append(html.Td("", style={
+                    "verticalAlign":"top","padding":"2px",
+                    "border":"1px solid #f1f5f9",
+                    "background":"white","minWidth":"110px","height":"28px",
                 }))
-            cells.append(html.Td(
-                pills or "",
-                style={
-                    "verticalAlign":"top","padding":"3px 4px",
-                    "border":"1px solid #e2e8f0",
-                    "background": c["light"] if evs else "white",
-                    "minHeight":"28px","minWidth":"80px",
-                }
-            ))
+
         rows.append(html.Tr(cells, style={"height":"28px"}))
 
     week_label = f"{days[0].strftime('%-d %b')} – {days[6].strftime('%-d %b %Y')}"
