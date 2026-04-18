@@ -1261,8 +1261,16 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                                  style={"fontWeight":"600","fontSize":"15px","color":"#1e293b"}),
                     ]),
                     dcc.Loading(type="circle", color="#f97316", children=[
-                        dcc.Graph(id="gantt-chart",
-                                  config={"displayModeBar":False,"scrollZoom":False,"doubleClick":False}),
+                        html.Div(
+                            dcc.Graph(id="gantt-chart",
+                                      config={"displayModeBar":False,"scrollZoom":False,"doubleClick":False}),
+                            style={
+                                "background":   "white",
+                                "borderRadius": "10px",
+                                "padding":      "16px",
+                                "boxShadow":    "0 1px 4px rgba(0,0,0,0.08)",
+                            }
+                        ),
                         html.Div(id="week-calendar",  style={"display":"none"}),
                         html.Div(id="month-calendar", style={"display":"none"}),
                     ]),
