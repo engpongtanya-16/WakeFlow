@@ -1211,7 +1211,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
     dcc.Store(id="city-store",             data="Barcelona"),
     dcc.Store(id="email-settings",         data={}),
     dcc.Store(id="extracted-events-store", data=[]),
-    dcc.Store(id="view-mode-store",        data="day"),
     dcc.Store(id="pending-upload",         data=None),
 
     # Header
@@ -1244,42 +1243,59 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         dbc.Tab(tab_id="tab-day", label="📅 My Day", children=[
             dbc.Row(className="mt-3 g-3", children=[
                 dbc.Col(width=8, children=[
-                    html.Div(className="d-flex align-items-center gap-3 mb-3 flex-wrap", children=[
-                        dbc.ButtonGroup([
-                            dbc.Button("Day",   id="btn-view-day",   size="sm", n_clicks=0, color="warning"),
-                            dbc.Button("Week",  id="btn-view-week",  size="sm", n_clicks=0, color="light"),
-                            dbc.Button("Month", id="btn-view-month", size="sm", n_clicks=0, color="light"),
+                    # ── 3 Sub-tabs: Day / Week / Month ───────────────────────
+                    dbc.Tabs(id="view-tabs", active_tab="view-day",
+                             className="mb-3", children=[
+
+                        dbc.Tab(tab_id="view-day", label="Day", children=[
+                            html.Div(className="d-flex align-items-center gap-3 mt-2 mb-2", children=[
+                                dcc.DatePickerSingle(
+                                    id="date-picker", date=datetime.now().date(),
+                                    display_format="D MMM YYYY", className="wf-datepicker",
+                                ),
+                                html.Div(id="selected-date-label",
+                                         style={"fontWeight":"600","fontSize":"15px","color":"#1e293b"}),
+                            ]),
                         ]),
-                        html.Div(id="date-picker-wrap", children=[
-                            dcc.DatePickerSingle(
-                                id="date-picker", date=datetime.now().date(),
-                                display_format="D MMM YYYY", className="wf-datepicker",
-                            ),
+
+                        dbc.Tab(tab_id="view-week", label="Week", children=[
+                            html.Div(className="d-flex align-items-center gap-3 mt-2 mb-2", children=[
+                                dcc.DatePickerSingle(
+                                    id="week-picker", date=datetime.now().date(),
+                                    display_format="D MMM YYYY", className="wf-datepicker",
+                                ),
+                                html.Div(id="selected-week-label",
+                                         style={"fontWeight":"600","fontSize":"15px","color":"#1e293b"}),
+                            ]),
                         ]),
-                        html.Div(id="month-picker-wrap", style={"display":"none"},
-                                 className="d-flex align-items-center gap-2", children=[
-                            dcc.Dropdown(
-                                id="month-select",
-                                options=[{"label": m, "value": i} for i, m in enumerate(
-                                    ["January","February","March","April","May","June",
-                                     "July","August","September","October","November","December"], 1
-                                )],
-                                value=datetime.now().month,
-                                clearable=False,
-                                style={"width":"130px","fontSize":"13px"},
-                            ),
-                            dcc.Dropdown(
-                                id="year-select",
-                                options=[{"label": str(y), "value": y}
-                                         for y in range(datetime.now().year - 2, datetime.now().year + 3)],
-                                value=datetime.now().year,
-                                clearable=False,
-                                style={"width":"88px","fontSize":"13px"},
-                            ),
+
+                        dbc.Tab(tab_id="view-month", label="Month", children=[
+                            html.Div(className="d-flex align-items-center gap-3 mt-2 mb-2", children=[
+                                dcc.Dropdown(
+                                    id="month-select",
+                                    options=[{"label": m, "value": i} for i, m in enumerate(
+                                        ["January","February","March","April","May","June",
+                                         "July","August","September","October","November","December"], 1
+                                    )],
+                                    value=datetime.now().month,
+                                    clearable=False,
+                                    style={"width":"140px","fontSize":"13px"},
+                                ),
+                                dcc.Dropdown(
+                                    id="year-select",
+                                    options=[{"label": str(y), "value": y}
+                                             for y in range(datetime.now().year - 2, datetime.now().year + 3)],
+                                    value=datetime.now().year,
+                                    clearable=False,
+                                    style={"width":"90px","fontSize":"13px"},
+                                ),
+                                html.Div(id="selected-month-label",
+                                         style={"fontWeight":"600","fontSize":"15px","color":"#1e293b"}),
+                            ]),
                         ]),
-                        html.Div(id="selected-date-label",
-                                 style={"fontWeight":"600","fontSize":"15px","color":"#1e293b"}),
                     ]),
+
+                    # ── Chart area (shared) ───────────────────────────────────
                     dcc.Loading(type="circle", color="#f97316", children=[
                         html.Div(
                             dcc.Graph(id="gantt-chart",
@@ -1461,58 +1477,34 @@ def cb_time_display(hour):
 
 @callback(
     Output("selected-date-label", "children"),
-    Input("date-picker",     "date"),
-    Input("month-select",    "value"),
-    Input("year-select",     "value"),
-    Input("view-mode-store", "data"),
+    Input("date-picker", "date"),
 )
-def cb_date_label(selected_date, sel_month, sel_year, view_mode):
-    if view_mode == "month":
-        year  = sel_year  or datetime.now().year
-        month = sel_month or datetime.now().month
-        return datetime(year, month, 1).strftime("%B %Y")
-    elif view_mode == "week":
-        from datetime import timedelta
-        d      = datetime.fromisoformat(str(selected_date)) if selected_date else datetime.now()
-        monday = d - timedelta(days=d.weekday())
-        sunday = monday + timedelta(days=6)
-        return f"{monday.strftime('%-d %b')} – {sunday.strftime('%-d %b %Y')}"
-    else:
-        d = datetime.fromisoformat(str(selected_date)) if selected_date else datetime.now()
-        return d.strftime("%A, %-d %B %Y")
+def cb_date_label(selected_date):
+    d = datetime.fromisoformat(str(selected_date)) if selected_date else datetime.now()
+    return d.strftime("%A, %-d %B %Y")
 
 
 @callback(
-    Output("view-mode-store", "data"),
-    Output("btn-view-day",   "color"),
-    Output("btn-view-week",  "color"),
-    Output("btn-view-month", "color"),
-    Input("btn-view-day",    "n_clicks"),
-    Input("btn-view-week",   "n_clicks"),
-    Input("btn-view-month",  "n_clicks"),
-    prevent_initial_call=True,
+    Output("selected-week-label", "children"),
+    Input("week-picker", "date"),
 )
-def cb_view_toggle(d, w, m):
-    mode = {"btn-view-day":"day","btn-view-week":"week","btn-view-month":"month"}.get(ctx.triggered_id,"day")
-    colors = {"day":("warning","light","light"),"week":("light","warning","light"),"month":("light","light","warning")}
-    c = colors[mode]
-    return mode, c[0], c[1], c[2]
+def cb_week_label(selected_date):
+    from datetime import timedelta
+    d      = datetime.fromisoformat(str(selected_date)) if selected_date else datetime.now()
+    monday = d - timedelta(days=d.weekday())
+    sunday = monday + timedelta(days=6)
+    return f"{monday.strftime('%-d %b')} – {sunday.strftime('%-d %b %Y')}"
 
 
-app.clientside_callback(
-    """
-    function(view_mode) {
-        var isMonth = view_mode === 'month';
-        return [
-            isMonth ? {display: 'none'} : {display: 'block'},
-            isMonth ? {display: 'flex', alignItems: 'center', gap: '8px'} : {display: 'none'}
-        ];
-    }
-    """,
-    Output("date-picker-wrap",  "style"),
-    Output("month-picker-wrap", "style"),
-    Input("view-mode-store",    "data"),
+@callback(
+    Output("selected-month-label", "children"),
+    Input("month-select", "value"),
+    Input("year-select",  "value"),
 )
+def cb_month_label(sel_month, sel_year):
+    year  = sel_year  or datetime.now().year
+    month = sel_month or datetime.now().month
+    return datetime(year, month, 1).strftime("%B %Y")
 
 
 @callback(
@@ -1523,36 +1515,38 @@ app.clientside_callback(
     Output("month-calendar", "children"),
     Output("month-calendar", "style"),
     Output("events-store",   "data"),
-    Input("date-picker",     "date"),
-    Input("month-select",    "value"),
-    Input("year-select",     "value"),
-    Input("view-mode-store", "data"),
+    Input("view-tabs",    "active_tab"),
+    Input("date-picker",  "date"),
+    Input("week-picker",  "date"),
+    Input("month-select", "value"),
+    Input("year-select",  "value"),
 )
-def cb_update_gantt(selected_date, sel_month, sel_year, view_mode):
+def cb_update_gantt(active_tab, day_date, week_date, sel_month, sel_year):
     from datetime import timedelta
     import calendar as cal_mod
-    date_str  = str(selected_date) if selected_date else datetime.now().strftime("%Y-%m-%d")
-    view_mode = view_mode or "day"
     hide = {"display":"none"}
     show = {"display":"block"}
+    active_tab = active_tab or "view-day"
 
-    if view_mode == "day":
-        events = get_calendar_events(date_str)
+    if active_tab == "view-day":
+        date_str = str(day_date) if day_date else datetime.now().strftime("%Y-%m-%d")
+        events   = get_calendar_events(date_str)
         return (build_gantt(events, date_str), show,
                 no_update, hide, no_update, hide, events)
 
-    elif view_mode == "week":
-        d      = datetime.fromisoformat(date_str)
-        monday = d - timedelta(days=d.weekday())
-        sunday = monday + timedelta(days=6)
-        ebd    = get_calendar_events_range(
+    elif active_tab == "view-week":
+        date_str = str(week_date) if week_date else datetime.now().strftime("%Y-%m-%d")
+        d        = datetime.fromisoformat(date_str)
+        monday   = d - timedelta(days=d.weekday())
+        sunday   = monday + timedelta(days=6)
+        ebd      = get_calendar_events_range(
             monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d"))
         all_events = [e for evs in ebd.values() for e in evs]
         return (go.Figure(), hide,
                 build_week_html(ebd, monday.strftime("%Y-%m-%d")), show,
                 no_update, hide, all_events)
 
-    else:  # month — ใช้ month/year dropdowns
+    else:  # view-month
         year  = sel_year  or datetime.now().year
         month = sel_month or datetime.now().month
         days_in_month = cal_mod.monthrange(year, month)[1]
