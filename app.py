@@ -719,57 +719,107 @@ def get_calendar_events_range(start_date_str: str, end_date_str: str) -> dict:
     return result
 
 
-def build_week_gantt(events_by_date: dict, start_date_str: str) -> go.Figure:
+DAY_COLORS = {
+    0: {"bg":"#163980","light":"#e8edf8","text":"white"},
+    1: {"bg":"#2a96c4","light":"#e0f4fb","text":"white"},
+    2: {"bg":"#866088","light":"#f0e8f0","text":"white"},
+    3: {"bg":"#E47F93","light":"#fdeef1","text":"white"},
+    4: {"bg":"#F25D54","light":"#feeeed","text":"white"},
+    5: {"bg":"#F78C63","light":"#fef3ee","text":"white"},
+    6: {"bg":"#ebbcc2","light":"#fdf4f5","text":"#5a3a3a"},
+}
+
+def build_week_html(events_by_date: dict, start_date_str: str):
     from datetime import timedelta
-    start      = datetime.fromisoformat(start_date_str)
-    day_labels = [(start + timedelta(days=i)).strftime("%a %d %b") for i in range(7)]
+    monday = datetime.fromisoformat(start_date_str)
+    days   = [monday + timedelta(days=i) for i in range(7)]
+    today  = datetime.now().date()
 
-    def t2h(t):
-        try:
-            h, m = map(int, t.split(":"))
-            return h + m/60
-        except Exception: return 0.0
+    ev_map = {}
+    for i, d in enumerate(days):
+        date_str = d.strftime("%Y-%m-%d")
+        for ev in events_by_date.get(date_str, []):
+            try:
+                hour = int(ev["time"].split(":")[0])
+            except Exception:
+                hour = 0
+            ev_map.setdefault((i, hour), []).append(ev)
 
-    fig = go.Figure()
-    has_events = False
-    for date_str, events in events_by_date.items():
-        d     = datetime.fromisoformat(date_str)
-        label = d.strftime("%a %d %b")
-        for e in events:
-            has_events = True
-            color = e.get("color") or "#60a5fa"
-            s = t2h(e["time"]); f = t2h(e["end"])
-            if f <= s: f = s + 0.5
-            fig.add_trace(go.Bar(
-                x=[f-s], y=[label], base=[s], orientation="h",
-                marker_color=color, marker_line_width=0, opacity=0.88,
-                name=e.get("calendar",""), showlegend=False,
-                customdata=[[e["title"], f"{e['time']} – {e['end']}", e.get("calendar",""), e.get("location","—")]],
-                hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<br>📅 %{customdata[2]}<br>📍 %{customdata[3]}<extra></extra>",
+    day_labels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+    header_cells = [html.Th("", style={
+        "width":"48px","background":"#f8fafc",
+        "border":"1px solid #e2e8f0","padding":"8px 4px",
+    })]
+    for i, d in enumerate(days):
+        c        = DAY_COLORS[i]
+        is_today = d.date() == today
+        header_cells.append(html.Th(
+            html.Div([
+                html.Div(day_labels[i], style={"fontWeight":"700","fontSize":"12px"}),
+                html.Div(d.strftime("%-d %b"), style={"fontWeight":"400","fontSize":"11px","opacity":"0.85"}),
+            ]),
+            style={
+                "background": "#f97316" if is_today else c["bg"],
+                "color":      "white",
+                "textAlign":  "center",
+                "padding":    "8px 4px",
+                "border":     "1px solid #e2e8f0",
+                "minWidth":   "80px",
+            }
+        ))
+
+    rows = [html.Tr(header_cells)]
+    for hour in range(24):
+        time_label = f"{hour:02d}:00"
+        cells = [html.Td(time_label, style={
+            "fontSize":"10px","color":"#94a3b8","textAlign":"right",
+            "padding":"2px 6px","verticalAlign":"top","whiteSpace":"nowrap",
+            "border":"1px solid #e2e8f0","background":"#f8fafc","fontWeight":"500",
+        })]
+        for i in range(7):
+            c    = DAY_COLORS[i]
+            evs  = ev_map.get((i, hour), [])
+            pills = []
+            for ev in evs:
+                t_end   = ev.get("end","")
+                t_label = f"{ev['time']}–{t_end}" if t_end else ev["time"]
+                title   = ev["title"]
+                pills.append(html.Div([
+                    html.Div(t_label, style={"fontSize":"9px","opacity":"0.85","lineHeight":"1"}),
+                    html.Div(
+                        (title[:16]+"…") if len(title)>16 else title,
+                        style={"fontSize":"10px","fontWeight":"600","lineHeight":"1.2","marginTop":"1px"}
+                    ),
+                ], style={
+                    "background":  ev.get("color") or c["bg"],
+                    "color":       "white",
+                    "borderRadius":"3px",
+                    "padding":     "2px 4px",
+                    "marginBottom":"2px",
+                    "cursor":      "default",
+                }))
+            cells.append(html.Td(
+                pills or "",
+                style={
+                    "verticalAlign":"top","padding":"3px 4px",
+                    "border":"1px solid #e2e8f0",
+                    "background": c["light"] if evs else "white",
+                    "minHeight":"28px","minWidth":"80px",
+                }
             ))
+        rows.append(html.Tr(cells, style={"height":"28px"}))
 
-    if not has_events:
-        fig.add_annotation(text="No events this week.", x=0.5, y=0.5, showarrow=False,
-                           font=dict(color="#475569",size=14), xref="paper", yref="paper")
-        fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                          xaxis=dict(visible=False), yaxis=dict(visible=False),
-                          margin=dict(l=8,r=8,t=8,b=8), height=380)
-        return fig
-
-    tick_vals  = list(range(0, 25, 2))
-    tick_texts = [f"{h:02d}:00" for h in tick_vals]
-    fig.update_layout(
-        plot_bgcolor="rgba(255,255,255,0.35)", paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#1e293b", size=12, family="DM Sans, sans-serif"),
-        margin=dict(l=8,r=8,t=32,b=8), barmode="overlay",
-        xaxis=dict(range=[0,24], tickvals=tick_vals, ticktext=tick_texts,
-                   showgrid=True, gridcolor="rgba(0,0,0,0.06)", color="#4b5563", fixedrange=False),
-        yaxis=dict(showgrid=False, title="",
-                   categoryorder="array", categoryarray=list(reversed(day_labels)),
-                   tickfont=dict(color="#1e293b"), fixedrange=True),
-        height=380, clickmode="event+select", dragmode="pan",
-    )
-    return fig
+    week_label = f"{days[0].strftime('%-d %b')} – {days[6].strftime('%-d %b %Y')}"
+    return html.Div([
+        html.H6(f"Week of {week_label}", style={
+            "fontWeight":"600","color":"#1e293b",
+            "marginBottom":"12px","fontSize":"15px",
+        }),
+        html.Div(
+            html.Table(rows, style={"width":"100%","borderCollapse":"collapse","background":"white"}),
+            style={"overflowX":"auto","borderRadius":"10px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)"},
+        ),
+    ], style={"background":"white","borderRadius":"10px","padding":"16px"})
 
 
 def build_month_calendar_html(events_by_date: dict, year: int, month: int):
@@ -1179,6 +1229,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                     dcc.Loading(type="circle", color="#f97316", children=[
                         dcc.Graph(id="gantt-chart",
                                   config={"displayModeBar":False,"scrollZoom":False,"doubleClick":False}),
+                        html.Div(id="week-calendar",  style={"display":"none"}),
                         html.Div(id="month-calendar", style={"display":"none"}),
                     ]),
                     html.P("👆 Click any event bar to get AI tips + see location on map",
@@ -1376,6 +1427,8 @@ def cb_view_toggle(d, w, m):
 @callback(
     Output("gantt-chart",    "figure"),
     Output("gantt-chart",    "style"),
+    Output("week-calendar",  "children"),
+    Output("week-calendar",  "style"),
     Output("month-calendar", "children"),
     Output("month-calendar", "style"),
     Output("events-store",   "data"),
@@ -1386,11 +1439,15 @@ def cb_update_gantt(selected_date, view_mode):
     from datetime import timedelta
     date_str  = str(selected_date) if selected_date else datetime.now().strftime("%Y-%m-%d")
     view_mode = view_mode or "day"
+    hide = {"display":"none"}
+    show = {"display":"block"}
 
     if view_mode == "day":
         events = get_calendar_events(date_str)
-        return (build_gantt(events, date_str), {"display":"block"},
-                no_update, {"display":"none"}, events)
+        return (build_gantt(events, date_str), show,
+                no_update, hide,
+                no_update, hide,
+                events)
 
     elif view_mode == "week":
         d      = datetime.fromisoformat(date_str)
@@ -1400,8 +1457,11 @@ def cb_update_gantt(selected_date, view_mode):
             monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
         )
         all_events = [e for evs in ebd.values() for e in evs]
-        return (build_week_gantt(ebd, monday.strftime("%Y-%m-%d")), {"display":"block"},
-                no_update, {"display":"none"}, all_events)
+        week_html  = build_week_html(ebd, monday.strftime("%Y-%m-%d"))
+        return (go.Figure(), hide,
+                week_html, show,
+                no_update, hide,
+                all_events)
 
     else:  # month
         import calendar as cal_mod
@@ -1412,8 +1472,10 @@ def cb_update_gantt(selected_date, view_mode):
         ebd           = get_calendar_events_range(start_str, end_str)
         all_events    = [e for evs in ebd.values() for e in evs]
         cal_html      = build_month_calendar_html(ebd, d.year, d.month)
-        return (go.Figure(), {"display":"none"},
-                cal_html, {"display":"block"}, all_events)
+        return (go.Figure(), hide,
+                no_update, hide,
+                cal_html, show,
+                all_events)
 
 
 @callback(
