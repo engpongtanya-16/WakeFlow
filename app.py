@@ -1459,14 +1459,22 @@ def cb_time_display(hour):
     return f"📌 Selected: {hour:02d}:00" if hour is not None else ""
 
 
-@callback(Output("selected-date-label","children"), Input("date-picker","date"))
-def cb_date_label(selected_date):
-    if not selected_date:
+@callback(
+    Output("selected-date-label", "children"),
+    Input("date-picker",     "date"),
+    Input("view-mode-store", "data"),
+    Input("month-select",    "value"),
+    Input("year-select",     "value"),
+)
+def cb_date_label(selected_date, view_mode, sel_month, sel_year):
+    if view_mode == "month":
+        year  = sel_year  or datetime.now().year
+        month = sel_month or datetime.now().month
+        return datetime(year, month, 1).strftime("%B %Y")
+    elif view_mode == "week":
         return ""
-    try:
-        return datetime.fromisoformat(str(selected_date)).strftime("%A, %d %B %Y")
-    except Exception:
-        return selected_date
+    else:  # day
+        return ""
 
 
 @callback(
@@ -1490,6 +1498,7 @@ def cb_view_toggle(d, w, m):
     Output("date-picker-wrap",  "style"),
     Output("month-picker-wrap", "style"),
     Input("view-mode-store",    "data"),
+    prevent_initial_call=False,
 )
 def cb_toggle_pickers(view_mode):
     if view_mode == "month":
