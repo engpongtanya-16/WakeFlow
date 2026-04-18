@@ -1250,16 +1250,14 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                             dbc.Button("Week",  id="btn-view-week",  size="sm", n_clicks=0, color="light"),
                             dbc.Button("Month", id="btn-view-month", size="sm", n_clicks=0, color="light"),
                         ]),
-                        html.Div(className="d-flex align-items-center gap-2", children=[
-                            html.Div(id="day-select-wrap", children=[
-                                dcc.Dropdown(
-                                    id="day-select",
-                                    options=[{"label": str(d), "value": d} for d in range(1, 32)],
-                                    value=datetime.now().day,
-                                    clearable=False,
-                                    style={"width":"72px","fontSize":"13px"},
-                                ),
-                            ]),
+                        html.Div(id="date-picker-wrap", children=[
+                            dcc.DatePickerSingle(
+                                id="date-picker", date=datetime.now().date(),
+                                display_format="D MMM YYYY", className="wf-datepicker",
+                            ),
+                        ]),
+                        html.Div(id="month-picker-wrap", style={"display":"none"},
+                                 className="d-flex align-items-center gap-2", children=[
                             dcc.Dropdown(
                                 id="month-select",
                                 options=[{"label": m, "value": i} for i, m in enumerate(
@@ -1463,27 +1461,24 @@ def cb_time_display(hour):
 
 @callback(
     Output("selected-date-label", "children"),
-    Input("day-select",      "value"),
+    Input("date-picker",     "date"),
     Input("month-select",    "value"),
     Input("year-select",     "value"),
     Input("view-mode-store", "data"),
 )
-def cb_date_label(day, month, year, view_mode):
-    import calendar as cal_mod
-    day   = day   or datetime.now().day
-    month = month or datetime.now().month
-    year  = year  or datetime.now().year
-    max_day = cal_mod.monthrange(year, month)[1]
-    day     = min(day, max_day)
-    d       = datetime(year, month, day)
+def cb_date_label(selected_date, sel_month, sel_year, view_mode):
     if view_mode == "month":
-        return d.strftime("%B %Y")
+        year  = sel_year  or datetime.now().year
+        month = sel_month or datetime.now().month
+        return datetime(year, month, 1).strftime("%B %Y")
     elif view_mode == "week":
         from datetime import timedelta
+        d      = datetime.fromisoformat(str(selected_date)) if selected_date else datetime.now()
         monday = d - timedelta(days=d.weekday())
         sunday = monday + timedelta(days=6)
         return f"{monday.strftime('%-d %b')} – {sunday.strftime('%-d %b %Y')}"
     else:
+        d = datetime.fromisoformat(str(selected_date)) if selected_date else datetime.now()
         return d.strftime("%A, %-d %B %Y")
 
 
@@ -1505,31 +1500,15 @@ def cb_view_toggle(d, w, m):
 
 
 @callback(
-    Output("day-select-wrap", "style"),
-    Input("view-mode-store",  "data"),
+    Output("date-picker-wrap",  "style"),
+    Output("month-picker-wrap", "style"),
+    Input("view-mode-store",    "data"),
     prevent_initial_call=False,
 )
-def cb_toggle_day_picker(view_mode):
+def cb_toggle_pickers(view_mode):
     if view_mode == "month":
-        return {"display":"none"}
-    return {"display":"block"}
-
-
-@callback(
-    Output("day-select", "options"),
-    Output("day-select", "value"),
-    Input("month-select", "value"),
-    Input("year-select",  "value"),
-    State("day-select",   "value"),
-)
-def cb_update_day_options(month, year, current_day):
-    import calendar as cal_mod
-    month   = month or datetime.now().month
-    year    = year  or datetime.now().year
-    max_day = cal_mod.monthrange(year, month)[1]
-    options = [{"label": str(d), "value": d} for d in range(1, max_day + 1)]
-    value   = min(current_day or 1, max_day)
-    return options, value
+        return {"display":"none"}, {"display":"flex","alignItems":"center","gap":"8px"}
+    return {"display":"block"}, {"display":"none"}
 
 
 @callback(
@@ -1540,20 +1519,15 @@ def cb_update_day_options(month, year, current_day):
     Output("month-calendar", "children"),
     Output("month-calendar", "style"),
     Output("events-store",   "data"),
-    Input("day-select",      "value"),
+    Input("date-picker",     "date"),
     Input("month-select",    "value"),
     Input("year-select",     "value"),
     Input("view-mode-store", "data"),
 )
-def cb_update_gantt(sel_day, sel_month, sel_year, view_mode):
+def cb_update_gantt(selected_date, sel_month, sel_year, view_mode):
     from datetime import timedelta
     import calendar as cal_mod
-    day   = sel_day   or datetime.now().day
-    month = sel_month or datetime.now().month
-    year  = sel_year  or datetime.now().year
-    max_day  = cal_mod.monthrange(year, month)[1]
-    day      = min(day, max_day)
-    date_str = f"{year}-{month:02d}-{day:02d}"
+    date_str  = str(selected_date) if selected_date else datetime.now().strftime("%Y-%m-%d")
     view_mode = view_mode or "day"
     hide = {"display":"none"}
     show = {"display":"block"}
@@ -1574,7 +1548,9 @@ def cb_update_gantt(sel_day, sel_month, sel_year, view_mode):
                 build_week_html(ebd, monday.strftime("%Y-%m-%d")), show,
                 no_update, hide, all_events)
 
-    else:  # month
+    else:  # month — ใช้ month/year dropdowns
+        year  = sel_year  or datetime.now().year
+        month = sel_month or datetime.now().month
         days_in_month = cal_mod.monthrange(year, month)[1]
         start_str = f"{year}-{month:02d}-01"
         end_str   = f"{year}-{month:02d}-{days_in_month:02d}"
