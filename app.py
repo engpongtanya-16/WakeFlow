@@ -1211,7 +1211,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
     dcc.Store(id="city-store",             data="Barcelona"),
     dcc.Store(id="email-settings",         data={}),
     dcc.Store(id="extracted-events-store", data=[]),
-    dcc.Store(id="pending-upload",         data=None),
 
     # Header
     dbc.Row(className="wf-header align-items-center py-3 mb-2", children=[
@@ -1322,7 +1321,97 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
             ]),
         ]),
 
-        # ── Tab 2: AI Assistant ──────────────────────────────────────────────
+        # ── Tab 2: My Planner ────────────────────────────────────────────────
+        dbc.Tab(tab_id="tab-planner", label="📋 My Planner", children=[
+            dbc.Row(className="mt-3 g-3", children=[
+                dbc.Col(width=7, children=[
+                    html.Div([
+                        html.H6("📎 Upload Schedule or Task List",
+                                style={"fontWeight":"600","color":"#1e293b","marginBottom":"8px"}),
+                        html.P("Upload a PDF or image (screenshot, photo of schedule, invitation) — "
+                               "WakeFlow will read it and extract your events automatically.",
+                               style={"fontSize":"13px","color":"#64748b","marginBottom":"12px"}),
+                        dcc.Upload(
+                            id="planner-upload",
+                            children=html.Div([
+                                html.Div("📂", style={"fontSize":"2.5rem","marginBottom":"8px"}),
+                                html.Div("Drag & drop or click to upload",
+                                         style={"fontWeight":"600","fontSize":"14px","color":"#1e293b"}),
+                                html.Div("PDF, PNG, JPG supported",
+                                         style={"fontSize":"12px","color":"#94a3b8","marginTop":"4px"}),
+                            ], style={"textAlign":"center","padding":"32px 16px"}),
+                            accept=".pdf,.png,.jpg,.jpeg",
+                            multiple=False,
+                            style={
+                                "border":"2px dashed #cbd5e1","borderRadius":"12px",
+                                "background":"rgba(255,255,255,0.7)","cursor":"pointer",
+                                "transition":"border-color 0.2s",
+                            },
+                            className="wf-upload-zone",
+                        ),
+                        dcc.Loading(
+                            type="circle", color="#f97316",
+                            children=html.Div(id="planner-result", className="mt-3"),
+                        ),
+                    ], style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                    }),
+                ]),
+                dbc.Col(width=5, children=[
+                    html.Div([
+                        html.H6("💡 How it works",
+                                style={"fontWeight":"600","color":"#1e293b","marginBottom":"12px"}),
+                        html.Div([
+                            html.Div(className="d-flex gap-3 mb-3", children=[
+                                html.Div("1", style={
+                                    "background":"#f97316","color":"white","borderRadius":"50%",
+                                    "width":"28px","height":"28px","display":"flex",
+                                    "alignItems":"center","justifyContent":"center",
+                                    "fontWeight":"700","fontSize":"13px","flexShrink":"0",
+                                }),
+                                html.Div([
+                                    html.Div("Upload a file", style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
+                                    html.Div("PDF timetable, screenshot of schedule, or photo of a handwritten plan",
+                                             style={"fontSize":"12px","color":"#64748b"}),
+                                ]),
+                            ]),
+                            html.Div(className="d-flex gap-3 mb-3", children=[
+                                html.Div("2", style={
+                                    "background":"#f97316","color":"white","borderRadius":"50%",
+                                    "width":"28px","height":"28px","display":"flex",
+                                    "alignItems":"center","justifyContent":"center",
+                                    "fontWeight":"700","fontSize":"13px","flexShrink":"0",
+                                }),
+                                html.Div([
+                                    html.Div("AI reads it", style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
+                                    html.Div("GPT-4o extracts event titles, dates, times, and locations",
+                                             style={"fontSize":"12px","color":"#64748b"}),
+                                ]),
+                            ]),
+                            html.Div(className="d-flex gap-3", children=[
+                                html.Div("3", style={
+                                    "background":"#f97316","color":"white","borderRadius":"50%",
+                                    "width":"28px","height":"28px","display":"flex",
+                                    "alignItems":"center","justifyContent":"center",
+                                    "fontWeight":"700","fontSize":"13px","flexShrink":"0",
+                                }),
+                                html.Div([
+                                    html.Div("Add to Calendar", style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
+                                    html.Div("Review extracted events and add them to Google Calendar in one click",
+                                             style={"fontSize":"12px","color":"#64748b"}),
+                                ]),
+                            ]),
+                        ]),
+                    ], style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                    }),
+                ]),
+            ]),
+        ]),
+
+        # ── Tab 3: AI Assistant ──────────────────────────────────────────────
         dbc.Tab(tab_id="tab-chat", label="💬 AI Assistant", children=[
             dbc.Row(className="mt-3 g-3", children=[
                 dbc.Col(width=10, children=[
@@ -1331,28 +1420,11 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                                    "I'll check your calendar, weather, and news automatically."),
                     ]),
                     dbc.InputGroup(className="mt-2", children=[
-                        dcc.Upload(
-                            id="upload-doc",
-                            children=dbc.Button(
-                                "📎", color="light", size="sm",
-                                title="Upload PDF or image to extract events",
-                                style={
-                                    "height":"38px", "width":"38px", "padding":"0",
-                                    "fontSize":"16px", "border":"1px solid #dee2e6",
-                                    "borderRadius":"8px 0 0 8px",
-                                    "display":"flex", "alignItems":"center",
-                                    "justifyContent":"center",
-                                },
-                            ),
-                            accept=".pdf,.png,.jpg,.jpeg",
-                            multiple=False,
-                        ),
-                        dbc.Input(id="chat-input", placeholder="Ask about your day, or upload a file to import events...",
-                                  type="text", className="wf-input", debounce=False),
+                        dbc.Input(id="chat-input", placeholder="Ask about your day...",
+                                  type="text", className="wf-input", debounce=False, n_submit=0),
                         dbc.Button("Send ↑", id="send-btn", color="warning",
                                    n_clicks=0, className="wf-send-btn"),
                     ]),
-                    html.Div(id="upload-preview", className="mt-1"),
 
                     # AI Response Voting row
                     html.Div(className="d-flex align-items-center gap-2 mt-2", children=[
@@ -1697,76 +1769,21 @@ def cb_show_map(n, loc_data):
 
 
 @callback(
-    Output("pending-upload", "data"),
-    Output("upload-preview", "children"),
-    Input("upload-doc",      "contents"),
-    State("upload-doc",      "filename"),
+    Output("chat-window",  "children"),
+    Output("chat-store",   "data"),
+    Output("chat-input",   "value"),
+    Input("send-btn",      "n_clicks"),
+    Input("chat-input",    "n_submit"),
+    State("chat-input",    "value"),
+    State("chat-store",    "data"),
+    State("city-store",    "data"),
+    State("topics-check",  "value"),
     prevent_initial_call=True,
 )
-def cb_store_upload(contents, filename):
-    if not contents or not filename:
-        return None, None
-
-    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-
-    if ext in ("png", "jpg", "jpeg"):
-        preview = html.Div(
-            className="d-flex align-items-center gap-2 p-2",
-            style={"background":"rgba(255,255,255,0.5)","borderRadius":"12px",
-                   "border":"1px solid rgba(255,255,255,0.7)","maxWidth":"320px"},
-            children=[
-                html.Img(src=contents,
-                         style={"height":"56px","width":"56px","objectFit":"cover",
-                                "borderRadius":"8px"}),
-                html.Div([
-                    html.Div(filename, style={"fontSize":"12px","fontWeight":"600","color":"#1e293b"}),
-                    html.Div("Image ready — type a message or just press Send",
-                             style={"fontSize":"11px","color":"#64748b"}),
-                ]),
-                html.Span("✕", id="clear-upload", style={"marginLeft":"auto","cursor":"pointer",
-                           "color":"#94a3b8","fontSize":"14px","padding":"0 4px"}),
-            ],
-        )
-    else:
-        preview = html.Div(
-            className="d-flex align-items-center gap-2 p-2",
-            style={"background":"rgba(255,255,255,0.5)","borderRadius":"12px",
-                   "border":"1px solid rgba(255,255,255,0.7)","maxWidth":"320px"},
-            children=[
-                html.Span("📄", style={"fontSize":"2rem"}),
-                html.Div([
-                    html.Div(filename, style={"fontSize":"12px","fontWeight":"600","color":"#1e293b"}),
-                    html.Div("PDF ready — type a message or just press Send",
-                             style={"fontSize":"11px","color":"#64748b"}),
-                ]),
-                html.Span("✕", id="clear-upload", style={"marginLeft":"auto","cursor":"pointer",
-                           "color":"#94a3b8","fontSize":"14px","padding":"0 4px"}),
-            ],
-        )
-
-    return {"contents": contents, "filename": filename}, preview
-
-
-@callback(
-    Output("chat-window",            "children"),
-    Output("chat-store",             "data"),
-    Output("chat-input",             "value"),
-    Output("pending-upload",         "data",     allow_duplicate=True),
-    Output("upload-preview",         "children", allow_duplicate=True),
-    Output("extracted-events-store", "data",     allow_duplicate=True),
-    Input("send-btn",        "n_clicks"),
-    Input("chat-input",      "n_submit"),
-    State("chat-input",      "value"),
-    State("chat-store",      "data"),
-    State("city-store",      "data"),
-    State("topics-check",    "value"),
-    State("pending-upload",  "data"),
-    prevent_initial_call=True,
-)
-def cb_chat(n_clicks, n_submit, user_text, history, city, topics, pending):
+def cb_chat(n_clicks, n_submit, user_text, history, city, topics):
     user_text = user_text or ""
-    if not user_text.strip() and not pending:
-        return no_update, no_update, no_update, no_update, no_update, no_update
+    if not user_text.strip():
+        return no_update, no_update, no_update
 
     city    = city    or "Barcelona"
     topics  = topics  or ["Tech", "Finance"]
@@ -1775,107 +1792,6 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics, pending):
     bubbles = [_bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
                            "I'll check your calendar, weather, and news automatically.")]
 
-    if pending:
-        fname    = pending["filename"]
-        contents = pending["contents"]
-        ext      = fname.lower().rsplit(".", 1)[-1] if "." in fname else ""
-
-        if ext in ("png", "jpg", "jpeg"):
-            user_bubble_content = html.Div([
-                html.Img(src=contents,
-                         style={"maxWidth":"220px","maxHeight":"160px","borderRadius":"10px",
-                                "display":"block","marginBottom":"4px" if user_text.strip() else "0"}),
-                html.Div(user_text.strip(), style={"fontSize":"13px"}) if user_text.strip() else None,
-            ])
-        else:
-            user_bubble_content = html.Div([
-                html.Div(className="d-flex align-items-center gap-2", children=[
-                    html.Span("📄", style={"fontSize":"1.4rem"}),
-                    html.Span(fname, style={"fontSize":"12px","fontWeight":"600"}),
-                ]),
-                html.Div(user_text.strip(), style={"fontSize":"13px","marginTop":"4px"})
-                    if user_text.strip() else None,
-            ])
-
-        user_bubble = html.Div(
-            className="wf-bubble wf-bubble-user mb-2",
-            style={"alignSelf":"flex-end"},
-            children=user_bubble_content,
-        )
-
-        events = []
-        if ext == "pdf":
-            try:
-                import io
-                decoded = base64.b64decode(contents.split(",", 1)[1])
-                try:
-                    import pdfplumber
-                    with pdfplumber.open(io.BytesIO(decoded)) as pdf:
-                        text = "\n".join(p.extract_text() or "" for p in pdf.pages)
-                except ImportError:
-                    import PyPDF2
-                    reader = PyPDF2.PdfReader(io.BytesIO(decoded))
-                    text = "\n".join(p.extract_text() or "" for p in reader.pages)
-                if text.strip():
-                    events = extract_events_from_text(text)
-            except Exception:
-                pass
-        elif ext in ("png", "jpg", "jpeg"):
-            mime = f"image/{'jpeg' if ext == 'jpg' else ext}"
-            b64  = contents.split(",", 1)[1]
-            events = extract_events_from_image(b64, mime)
-
-        if events:
-            event_lines = "\n".join(
-                f"- **{ev.get('title','?')}** — {ev.get('date','')} "
-                f"{ev.get('start_time','') or 'All day'}"
-                f"{(' @ ' + ev['location']) if ev.get('location') else ''}"
-                for ev in events
-            )
-            ai_msg = (
-                f"📎 I found **{len(events)} event{'s' if len(events)>1 else ''}** "
-                f"in `{fname}`:\n\n{event_lines}\n\n"
-                "Click **➕ Add to Calendar** to add them all!"
-            )
-            _google_ok = os.path.exists(TOKEN_FILE)
-            add_section = html.Div(className="mt-2", children=[
-                dbc.Button(
-                    f"➕ Add {len(events)} Event{'s' if len(events)>1 else ''} to Google Calendar",
-                    id="add-all-events-btn", color="success", size="sm", n_clicks=0,
-                    disabled=not _google_ok,
-                ),
-                html.Div(id="add-events-status", className="mt-1", style={"fontSize":"12px"}),
-            ])
-            ai_bubble = html.Div(
-                className="wf-bubble wf-bubble-ai mb-2",
-                style={"alignSelf":"flex-start","maxWidth":"90%"},
-                children=[
-                    html.Div([
-                        html.Span("🤖 ", style={"fontSize":"16px"}),
-                        html.Span("WakeFlow", style={"fontSize":"11px","color":"#475569","fontWeight":"600"}),
-                    ], style={"marginBottom":"4px"}),
-                    dcc.Markdown(ai_msg, style={"margin":"0","fontSize":"13px","color":"#1e293b"}),
-                    add_section,
-                ],
-            )
-        else:
-            ai_bubble = _bubble_ai(
-                f"📎 I read **{fname}** but couldn't find events with clear dates and times.\n\n"
-                "Try uploading a file with specific dates like 'Monday April 21, 14:00'."
-            )
-
-        for m in history:
-            if m["role"] == "user":
-                display = m["content"].split("] ")[-1] if "] " in m["content"] else m["content"]
-                bubbles.append(_bubble_user(display))
-            elif m["role"] == "assistant":
-                bubbles.append(_bubble_ai(m["content"]))
-        bubbles.append(user_bubble)
-        bubbles.append(ai_bubble)
-
-        return bubbles, history, "", None, None, events if events else []
-
-    # ── normal chat (no file) ─────────────────────────────────────────────────
     today_tag = datetime.now().strftime("%A %Y-%m-%d")
     enriched  = f"[TODAY: {today_tag}] [CITY: {city}] [TOPICS: {', '.join(topics)}] {user_text}"
     history.append({"role":"user","content":enriched})
@@ -1889,7 +1805,7 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics, pending):
         elif m["role"] == "assistant":
             bubbles.append(_bubble_ai(m["content"]))
 
-    return bubbles, history, "", None, None, no_update
+    return bubbles, history, ""
 
 
 @callback(
@@ -2087,12 +2003,12 @@ def cb_save_schedule(n, recipient, gmail_user, gmail_pass, hour, city, topics):
                       color="success", dismissable=True), info)
 
 
-# ── Import Events Callbacks ───────────────────────────────────────────────────
+# ── My Planner Callbacks ─────────────────────────────────────────────────────
 @callback(
-    Output("import-result",          "children"),
+    Output("planner-result",         "children"),
     Output("extracted-events-store", "data"),
-    Input("upload-doc",              "contents"),
-    State("upload-doc",              "filename"),
+    Input("planner-upload",          "contents"),
+    State("planner-upload",          "filename"),
     prevent_initial_call=True,
 )
 def cb_process_upload(contents, filename):
