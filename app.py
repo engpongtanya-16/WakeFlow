@@ -607,7 +607,7 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
         seen_legends.add(calendar)
         fig.add_trace(go.Bar(
             x=[f - s],
-            y=[calendar],
+            y=[e["title"]],
             base=[s],
             orientation="h",
             marker_color=color,
@@ -647,8 +647,9 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
         ),
         yaxis=dict(
             showgrid=False, title="", autorange="reversed",
-            tickfont=dict(color="#1e293b"),
+            tickfont=dict(color="#1e293b", size=12),
             fixedrange=True,
+            automargin=True,
         ),
         height=330, clickmode="event+select", dragmode="pan",
     )
