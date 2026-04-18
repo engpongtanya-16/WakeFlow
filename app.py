@@ -1246,17 +1246,37 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                 dbc.Col(width=8, children=[
                     html.Div(className="d-flex align-items-center gap-3 mb-3 flex-wrap", children=[
                         dbc.ButtonGroup([
-                            dbc.Button("Day",   id="btn-view-day",   size="sm", n_clicks=0,
-                                       color="warning"),
-                            dbc.Button("Week",  id="btn-view-week",  size="sm", n_clicks=0,
-                                       color="light"),
-                            dbc.Button("Month", id="btn-view-month", size="sm", n_clicks=0,
-                                       color="light"),
+                            dbc.Button("Day",   id="btn-view-day",   size="sm", n_clicks=0, color="warning"),
+                            dbc.Button("Week",  id="btn-view-week",  size="sm", n_clicks=0, color="light"),
+                            dbc.Button("Month", id="btn-view-month", size="sm", n_clicks=0, color="light"),
                         ]),
-                        dcc.DatePickerSingle(
-                            id="date-picker", date=datetime.now().date(),
-                            display_format="D MMM YYYY", className="wf-datepicker",
-                        ),
+                        html.Div(id="date-picker-wrap", children=[
+                            dcc.DatePickerSingle(
+                                id="date-picker", date=datetime.now().date(),
+                                display_format="D MMM YYYY", className="wf-datepicker",
+                            ),
+                        ]),
+                        html.Div(id="month-picker-wrap", style={"display":"none"},
+                                 className="d-flex align-items-center gap-2", children=[
+                            dcc.Dropdown(
+                                id="month-select",
+                                options=[{"label": m, "value": i} for i, m in enumerate(
+                                    ["January","February","March","April","May","June",
+                                     "July","August","September","October","November","December"], 1
+                                )],
+                                value=datetime.now().month,
+                                clearable=False,
+                                style={"width":"140px","fontSize":"13px"},
+                            ),
+                            dcc.Dropdown(
+                                id="year-select",
+                                options=[{"label": str(y), "value": y}
+                                         for y in range(datetime.now().year - 2, datetime.now().year + 3)],
+                                value=datetime.now().year,
+                                clearable=False,
+                                style={"width":"90px","fontSize":"13px"},
+                            ),
+                        ]),
                         html.Div(id="selected-date-label",
                                  style={"fontWeight":"600","fontSize":"15px","color":"#1e293b"}),
                     ]),
@@ -1467,6 +1487,17 @@ def cb_view_toggle(d, w, m):
 
 
 @callback(
+    Output("date-picker-wrap",  "style"),
+    Output("month-picker-wrap", "style"),
+    Input("view-mode-store",    "data"),
+)
+def cb_toggle_pickers(view_mode):
+    if view_mode == "month":
+        return {"display":"none"}, {"display":"flex","alignItems":"center","gap":"8px"}
+    return {"display":"block"}, {"display":"none"}
+
+
+@callback(
     Output("gantt-chart",    "figure"),
     Output("gantt-chart",    "style"),
     Output("week-calendar",  "children"),
@@ -1476,8 +1507,10 @@ def cb_view_toggle(d, w, m):
     Output("events-store",   "data"),
     Input("date-picker",     "date"),
     Input("view-mode-store", "data"),
+    Input("month-select",    "value"),
+    Input("year-select",     "value"),
 )
-def cb_update_gantt(selected_date, view_mode):
+def cb_update_gantt(selected_date, view_mode, sel_month, sel_year):
     from datetime import timedelta
     date_str  = str(selected_date) if selected_date else datetime.now().strftime("%Y-%m-%d")
     view_mode = view_mode or "day"
@@ -1487,33 +1520,29 @@ def cb_update_gantt(selected_date, view_mode):
     if view_mode == "day":
         events = get_calendar_events(date_str)
         return (build_gantt(events, date_str), show,
-                no_update, hide,
-                no_update, hide,
-                events)
+                no_update, hide, no_update, hide, events)
 
     elif view_mode == "week":
         d      = datetime.fromisoformat(date_str)
         monday = d - timedelta(days=d.weekday())
         sunday = monday + timedelta(days=6)
         ebd    = get_calendar_events_range(
-            monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
-        )
+            monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d"))
         all_events = [e for evs in ebd.values() for e in evs]
-        week_html  = build_week_html(ebd, monday.strftime("%Y-%m-%d"))
         return (go.Figure(), hide,
-                week_html, show,
-                no_update, hide,
-                all_events)
+                build_week_html(ebd, monday.strftime("%Y-%m-%d")), show,
+                no_update, hide, all_events)
 
     else:  # month
         import calendar as cal_mod
-        d             = datetime.fromisoformat(date_str)
-        days_in_month = cal_mod.monthrange(d.year, d.month)[1]
-        start_str     = d.replace(day=1).strftime("%Y-%m-%d")
-        end_str       = d.replace(day=days_in_month).strftime("%Y-%m-%d")
-        ebd           = get_calendar_events_range(start_str, end_str)
-        all_events    = [e for evs in ebd.values() for e in evs]
-        cal_html      = build_month_calendar_html(ebd, d.year, d.month)
+        year  = sel_year  or datetime.now().year
+        month = sel_month or datetime.now().month
+        days_in_month = cal_mod.monthrange(year, month)[1]
+        start_str = f"{year}-{month:02d}-01"
+        end_str   = f"{year}-{month:02d}-{days_in_month:02d}"
+        ebd       = get_calendar_events_range(start_str, end_str)
+        all_events = [e for evs in ebd.values() for e in evs]
+        cal_html      = build_month_calendar_html(ebd, year, month)
         return (go.Figure(), hide,
                 no_update, hide,
                 cal_html, show,
