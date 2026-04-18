@@ -1499,16 +1499,20 @@ def cb_view_toggle(d, w, m):
     return mode, c[0], c[1], c[2]
 
 
-@callback(
+app.clientside_callback(
+    """
+    function(view_mode) {
+        var isMonth = view_mode === 'month';
+        return [
+            isMonth ? {display: 'none'} : {display: 'block'},
+            isMonth ? {display: 'flex', alignItems: 'center', gap: '8px'} : {display: 'none'}
+        ];
+    }
+    """,
     Output("date-picker-wrap",  "style"),
     Output("month-picker-wrap", "style"),
     Input("view-mode-store",    "data"),
-    prevent_initial_call=False,
 )
-def cb_toggle_pickers(view_mode):
-    if view_mode == "month":
-        return {"display":"none"}, {"display":"flex","alignItems":"center","gap":"8px"}
-    return {"display":"block"}, {"display":"none"}
 
 
 @callback(
