@@ -1240,8 +1240,9 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         # ── Tab 1: My Day ────────────────────────────────────────────────────
         dbc.Tab(tab_id="tab-day", label="📅 My Day", children=[
             dbc.Row(className="mt-3 g-3", children=[
+
+                # ── Left: Calendar chart ──────────────────────────────────────
                 dbc.Col(width=8, children=[
-                    # ── 3 Sub-tabs: Day / Week / Month ───────────────────────
                     dbc.Tabs(id="view-tabs", active_tab="view-day",
                              className="mb-3", children=[
 
@@ -1293,33 +1294,31 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         ]),
                     ]),
 
-                    # ── Chart area (shared) ───────────────────────────────────
+                    # Chart area
                     dcc.Loading(type="circle", color="#f97316", children=[
                         html.Div(
                             dcc.Graph(id="gantt-chart",
                                       config={"displayModeBar":False,"scrollZoom":False,"doubleClick":False}),
-                            style={
-                                "background":   "white",
-                                "borderRadius": "10px",
-                                "padding":      "16px",
-                                "boxShadow":    "0 1px 4px rgba(0,0,0,0.08)",
-                            }
+                            style={"background":"white","borderRadius":"10px",
+                                   "padding":"16px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)"}
                         ),
                         html.Div(id="week-calendar",  style={"display":"none"}),
                         html.Div(id="month-calendar", style={"display":"none"}),
                     ]),
-                    html.P("👆 Click any event bar to get AI tips + see location on map",
+                    html.P("👆 Click any event to see AI tips below",
                            className="wf-hint mt-1"),
-                ]),
-                dbc.Col(width=4, children=[
-                    # Event tips (shown when event clicked)
-                    html.Div(id="event-panel", style={"display":"none"},
-                             className="wf-card mb-3"),
 
-                    # AI Chat (always visible)
+                    # Event panel — shown BELOW the chart when event is clicked
+                    html.Div(id="event-panel", style={"display":"none"},
+                             className="wf-card mt-3"),
+                ]),
+
+                # ── Right: AI Chat ────────────────────────────────────────────
+                dbc.Col(width=4, children=[
                     html.Div(style={
                         "background":"white","borderRadius":"12px",
                         "padding":"16px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                        "height":"100%",
                     }, children=[
                         html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
                             html.Span("🤖", style={"fontSize":"1.1rem"}),
@@ -1327,7 +1326,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                                 "fontWeight":"700","fontSize":"14px","color":"#1e293b"}),
                         ]),
                         html.Div(id="chat-window",
-                                 style={"height":"320px","overflowY":"auto","marginBottom":"8px"},
+                                 style={"height":"400px","overflowY":"auto","marginBottom":"8px"},
                                  children=[
                             _bubble_ai("Hey! 👋 Ask me about your schedule, weather, or anything else!"),
                         ]),
