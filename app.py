@@ -1047,14 +1047,18 @@ def send_email(recipient: str, city: str, topics: list,
         msg["From"]    = gmail_user
         msg["To"]      = recipient
         msg.attach(MIMEText(html_content, "html", "utf-8"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+
+        # ใช้ SMTP แบบ timeout + STARTTLS แทน SMTP_SSL เพื่อไม่ให้ block worker
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=25) as s:
+            s.ehlo()
+            s.starttls()
             s.login(gmail_user, gmail_password)
             s.send_message(msg)
-        return True, f"Briefing sent to {recipient}!"
+        return True, f"✅ Briefing sent to {recipient}!"
     except smtplib.SMTPAuthenticationError:
-        return False, "Gmail authentication failed. Use an App Password."
+        return False, "❌ Gmail authentication failed. Check App Password in Railway Variables."
     except Exception as e:
-        return False, f"{str(e).replace(chr(10),' ')}"
+        return False, f"❌ {str(e).replace(chr(10),' ')}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2032,18 +2036,32 @@ def cb_send_email(n, recipient, user_name, gmail_user, gmail_pass, city, topics)
     password = gmail_pass or GMAIL_APP_PASSWORD
     if not sender:
         return dbc.Alert(
-            "❌ ยังไม่ได้ตั้งค่า GMAIL_SENDER — เพิ่มใน Railway Variables: GMAIL_SENDER = your@gmail.com",
+            "❌ ยังไม่ได้ตั้งค่า GMAIL_SENDER ใน Railway Variables",
             color="danger"
         )
     if not password:
         return dbc.Alert(
-            "❌ ยังไม่ได้ตั้งค่า GMAIL_APP_PASSWORD — เพิ่มใน Railway Variables: GMAIL_APP_PASSWORD = your-app-password",
+            "❌ ยังไม่ได้ตั้งค่า GMAIL_APP_PASSWORD ใน Railway Variables",
             color="danger"
         )
-    ok, msg = send_email(recipient, city or "Barcelona", topics or ["Tech","Finance"],
-                         gmail_user=sender, gmail_password=password,
-                         user_name=user_name or "")
-    return dbc.Alert(msg, color="success" if ok else "danger", dismissable=True)
+
+    import threading
+    result = {"ok": False, "msg": "Timeout"}
+
+    def _do_send():
+        ok, msg = send_email(
+            recipient, city or "Barcelona", topics or ["Tech","Finance"],
+            gmail_user=sender, gmail_password=password,
+            user_name=user_name or "",
+        )
+        result["ok"]  = ok
+        result["msg"] = msg
+
+    t = threading.Thread(target=_do_send, daemon=True)
+    t.start()
+    t.join(timeout=20)   # รอสูงสุด 20 วิ
+
+    return dbc.Alert(result["msg"], color="success" if result["ok"] else "danger", dismissable=True)
 
 
 @callback(
