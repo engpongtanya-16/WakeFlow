@@ -2,21 +2,16 @@ import json
 import os
 import re
 import base64
-import smtplib
 from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
-import pandas as pd
 import requests
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import dash
 import dash_bootstrap_components as dbc
-import plotly.express as px
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html, no_update, ctx, Patch
+from dash import Input, Output, State, callback, dcc, html, no_update, ctx
 
 load_dotenv()
 if not os.getenv("REDIRECT_URI", "").startswith("https"):
@@ -55,9 +50,6 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
 ]
 
-GMAIL_SENDER       = os.getenv("GMAIL_SENDER", "")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
-SENDGRID_API_KEY   = os.getenv("SENDGRID_API_KEY", "")
 BREVO_API_KEY      = os.getenv("BREVO_API_KEY", "")
 
 try:
@@ -275,25 +267,6 @@ def get_calendar_events(date_str: str) -> list:
         except Exception:
             pass
     return []
-
-
-def _mock_schedule(date_str: str) -> list:
-    day = datetime.fromisoformat(date_str).strftime("%A") if date_str else "Monday"
-    if day in ("Saturday","Sunday"):
-        return [
-            {"time":"09:00","end":"10:00","title":"Gym session",        "type":"personal","location":"Campus gym","notes":"Leg day","meet_link":""},
-            {"time":"11:00","end":"13:00","title":"Brunch with friends","type":"personal","location":"Cafe Latte","notes":"","meet_link":""},
-            {"time":"14:00","end":"17:00","title":"Group project study","type":"deadline","location":"Library",   "notes":"Finish slides","meet_link":""},
-        ]
-    return [
-        {"time":"08:00","end":"08:30","title":"Morning standup",           "type":"meeting","location":"Zoom",      "notes":"Weekly sync",   "meet_link":"https://zoom.us/j/123456789"},
-        {"time":"09:00","end":"10:30","title":"PDAI Lecture — Prof. Jose","type":"class",  "location":"Room 2.01","notes":"Bring laptop",  "meet_link":""},
-        {"time":"11:00","end":"12:00","title":"Team project sync",         "type":"meeting","location":"Library",   "notes":"Data pipeline","meet_link":"https://meet.google.com/abc-defg-hij"},
-        {"time":"12:30","end":"13:30","title":"Lunch",                     "type":"personal","location":"",         "notes":"",             "meet_link":""},
-        {"time":"14:00","end":"15:30","title":"AI II Lecture",             "type":"class",  "location":"Room 3.05","notes":"Quiz next week","meet_link":""},
-        {"time":"16:00","end":"17:00","title":"Gym session",               "type":"personal","location":"Campus gym","notes":"Upper body",  "meet_link":""},
-        {"time":"18:00","end":"19:00","title":"Cloud Platforms deadline",  "type":"deadline","location":"",         "notes":"Submit Moodle","meet_link":""},
-    ]
 
 
 def geocode_location(place: str, city_hint: str = "") -> dict | None:
@@ -626,7 +599,7 @@ def build_gantt(events: list, date_str: str) -> go.Figure:
             ),
         ))
 
-    # Tick ทุก 2 ชั่วโมง
+    # Ticks every 2 hours
     tick_vals  = list(range(0, 25, 2))
     tick_texts = [f"{h:02d}:00" for h in tick_vals]
 
@@ -993,7 +966,7 @@ def _build_email_html(city: str, topics: list, user_name: str = "") -> str:
     today    = datetime.now().strftime("%A, %B %d, %Y")
     greeting = f"Hello {user_name}," if user_name.strip() else "Hello,"
 
-    # Schedule rows — แสดง time range + title + location
+    # Schedule rows — time range + title + location
     if events:
         rows = "".join(
             f"<tr style='border-bottom:1px solid #fde68a'>"
@@ -1016,7 +989,7 @@ def _build_email_html(city: str, topics: list, user_name: str = "") -> str:
     <p style="color:#64748b;margin:0">No events scheduled for today — enjoy your free day! 🎉</p>
   </div>"""
 
-    # News items — แสดงพร้อม description
+    # News items — with description
     news_items = "".join(
         f"<li style='margin-bottom:12px'>"
         f"<a href='{a['url']}' style='color:#1d6fad;text-decoration:none;font-weight:600'>{a['title']}</a><br>"
@@ -1053,12 +1026,11 @@ def _build_email_html(city: str, topics: list, user_name: str = "") -> str:
 
 
 def send_email(recipient: str, city: str, topics: list,
-               gmail_user: str = "", gmail_password: str = "",
                user_name: str = "") -> tuple[bool, str]:
-    """ส่งอีเมลผ่าน Brevo API"""
+    """Send email via Brevo API."""
     api_key = BREVO_API_KEY
     if not api_key:
-        return False, "❌ ยังไม่ได้ตั้งค่า BREVO_API_KEY ใน Railway Variables"
+        return False, "❌ BREVO_API_KEY not set in Railway Variables"
     try:
         html_content = _build_email_html(city, topics, user_name=user_name)
         html_content = (html_content
@@ -1351,69 +1323,17 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         # ── Tab 2: My Planner ────────────────────────────────────────────────
         dbc.Tab(tab_id="tab-planner", label="📋 My Planner", children=[
             dbc.Row(className="mt-3 g-3", children=[
-
-                # ── Left: Upload + Topic Tagger ──────────────────────────────
-                dbc.Col(width=6, children=[
+                dbc.Col(width=8, children=[
                     html.Div(style={
                         "background":"white","borderRadius":"12px",
                         "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
-                        "marginBottom":"16px",
                     }, children=[
-                        html.H6("📎 Upload File",
-                                style={"fontWeight":"700","color":"#1e293b","marginBottom":"8px"}),
-                        html.P("Upload a PDF or image, then tag it with a calendar/subject.",
-                               style={"fontSize":"13px","color":"#64748b","marginBottom":"12px"}),
-
-                        # Topic selector + manager
-                        html.Div(className="d-flex align-items-center gap-2 mb-3 flex-wrap", children=[
-                            dcc.Dropdown(
-                                id="planner-topic-dropdown",
-                                options=[{"label":"🗓️ Loading calendars...","value":""}],
-                                placeholder="Select subject / calendar...",
-                                clearable=True,
-                                style={"width":"220px","fontSize":"13px"},
-                            ),
-                            dbc.Input(
-                                id="planner-new-topic",
-                                placeholder="+ Add custom topic...",
-                                size="sm", style={"width":"160px","fontSize":"13px"},
-                            ),
-                            dbc.Button("➕", id="planner-add-topic-btn",
-                                       color="light", size="sm", n_clicks=0),
+                        html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
+                            html.Span("✅", style={"fontSize":"1.3rem"}),
+                            html.H6("My Tasks", style={"fontWeight":"700","color":"#1e293b","margin":"0"}),
+                            html.Small("Upload files via AI Assistant tab to link to calendars",
+                                       style={"color":"#94a3b8","fontSize":"11px","marginLeft":"8px"}),
                         ]),
-                        html.Div(id="planner-topic-tags", className="mb-3"),
-
-                        dcc.Upload(
-                            id="planner-upload",
-                            children=html.Div([
-                                html.Div("📂", style={"fontSize":"2rem","marginBottom":"6px"}),
-                                html.Div("Drag & drop or click to upload",
-                                         style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
-                                html.Div("PDF, PNG, JPG",
-                                         style={"fontSize":"11px","color":"#94a3b8","marginTop":"2px"}),
-                            ], style={"textAlign":"center","padding":"20px 16px"}),
-                            accept=".pdf,.png,.jpg,.jpeg",
-                            multiple=False,
-                            style={
-                                "border":"2px dashed #cbd5e1","borderRadius":"12px",
-                                "background":"rgba(249,250,251,0.8)","cursor":"pointer",
-                            },
-                        ),
-                        dcc.Loading(type="circle", color="#f97316",
-                                    children=html.Div(id="planner-result", className="mt-3")),
-                    ]),
-                ]),
-
-                # ── Right: Task / To-Do Manager ──────────────────────────────
-                dbc.Col(width=6, children=[
-                    html.Div(style={
-                        "background":"white","borderRadius":"12px",
-                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
-                    }, children=[
-                        html.H6("✅ My Tasks",
-                                style={"fontWeight":"700","color":"#1e293b","marginBottom":"12px"}),
-
-                        # Add task input
                         html.Div(className="d-flex gap-2 mb-3", children=[
                             dcc.Dropdown(
                                 id="task-category-select",
@@ -1423,27 +1343,19 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                                     {"label":"💼 Work",        "value":"work"},
                                     {"label":"🏠 Personal",    "value":"personal"},
                                 ],
-                                value="todo",
-                                clearable=False,
-                                style={"width":"140px","fontSize":"12px"},
+                                value="todo", clearable=False,
+                                style={"width":"150px","fontSize":"12px"},
                             ),
                             dbc.Input(
                                 id="task-input",
                                 placeholder="Add a new task...",
-                                type="text",
-                                size="sm",
-                                n_submit=0,
-                                className="wf-input",
-                                style={"fontSize":"13px"},
+                                type="text", size="sm", n_submit=0,
+                                className="wf-input", style={"fontSize":"13px"},
                             ),
                             dbc.Button("➕", id="task-add-btn",
                                        color="warning", size="sm", n_clicks=0),
                         ]),
-
-                        # Task list display
                         html.Div(id="task-list-display"),
-
-                        # Store for tasks
                         dcc.Store(id="task-store", data=[]),
                     ]),
                 ]),
@@ -1454,18 +1366,61 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         dbc.Tab(tab_id="tab-chat", label="💬 AI Assistant", children=[
             dbc.Row(className="mt-3 g-3", children=[
                 dbc.Col(width=10, children=[
-                    html.Div(id="chat-window", children=[
-                        _bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
-                                   "I'll check your calendar, weather, and news automatically."),
+                    # Planner mode bar — shown when file is uploaded
+                    html.Div(id="planner-mode-bar", style={"display":"none"},
+                             className="d-flex align-items-center gap-2 mb-2 p-2 flex-wrap",
+                             children=[
+                        html.Span("🗓️", style={"fontSize":"14px"}),
+                        html.Span("Adding to:", style={"fontSize":"12px","color":"#64748b","fontWeight":"600"}),
+                        dcc.Dropdown(
+                            id="chat-calendar-select",
+                            options=[{"label":"📅 Primary Calendar","value":"primary"}],
+                            value="primary",
+                            clearable=False,
+                            style={"width":"220px","fontSize":"12px"},
+                            placeholder="Select target calendar...",
+                        ),
+                        dbc.Button("✕ Cancel upload", id="chat-cancel-upload",
+                                   color="light", size="sm", n_clicks=0,
+                                   style={"fontSize":"11px","marginLeft":"auto"}),
                     ]),
+                    dcc.Store(id="pending-upload", data=None),
+
+                    # Chat window
+                    html.Div(id="chat-window", children=[
+                        _bubble_ai(
+                            "Hey! I'm WakeFlow 👋 Ask me anything, or **upload a file** 📎 "
+                            "to extract your schedule and add it to Google Calendar!"
+                        ),
+                    ]),
+
+                    # Upload preview
+                    html.Div(id="upload-preview", className="mt-1"),
+
+                    # Input area
                     dbc.InputGroup(className="mt-2", children=[
-                        dbc.Input(id="chat-input", placeholder="Ask about your day...",
-                                  type="text", className="wf-input", debounce=False, n_submit=0),
+                        dcc.Upload(
+                            id="upload-doc",
+                            children=dbc.Button(
+                                "📎", color="light", size="sm",
+                                title="Upload PDF or image to extract events",
+                                style={"height":"38px","width":"38px","padding":"0",
+                                       "fontSize":"16px","border":"1px solid #dee2e6",
+                                       "borderRadius":"8px 0 0 8px","display":"flex",
+                                       "alignItems":"center","justifyContent":"center"},
+                            ),
+                            accept=".pdf,.png,.jpg,.jpeg",
+                            multiple=False,
+                        ),
+                        dbc.Input(id="chat-input",
+                                  placeholder="Ask about your day, or type to correct extracted events...",
+                                  type="text", className="wf-input",
+                                  debounce=False, n_submit=0),
                         dbc.Button("Send ↑", id="send-btn", color="warning",
                                    n_clicks=0, className="wf-send-btn"),
                     ]),
 
-                    # AI Response Voting row
+                    # AI Response Voting
                     html.Div(className="d-flex align-items-center gap-2 mt-2", children=[
                         html.Small("Rate last response:",
                                    style={"color":"#64748b","fontSize":"12px","fontWeight":"500"}),
@@ -1580,9 +1535,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         ]),
                         html.P("Get your calendar, weather, and news delivered to your inbox every morning.",
                                style={"fontSize":"13px","color":"#64748b","marginBottom":"16px"}),
-
-                        dbc.Input(id="gmail-user-input", type="hidden", value=""),
-                        dbc.Input(id="gmail-pass-input", type="hidden", value=""),
 
                         dbc.Label("👤 Your name (for email greeting)",
                                   style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
@@ -1900,35 +1852,195 @@ def cb_show_map(n, loc_data):
 
 
 @callback(
-    Output("chat-window",  "children"),
-    Output("chat-store",   "data"),
-    Output("chat-input",   "value"),
-    Input("send-btn",      "n_clicks"),
-    Input("chat-input",    "n_submit"),
-    State("chat-input",    "value"),
-    State("chat-store",    "data"),
-    State("city-store",    "data"),
-    State("topics-check",  "value"),
+    Output("chat-window",        "children"),
+    Output("chat-store",         "data"),
+    Output("chat-input",         "value"),
+    Output("pending-upload",     "data",    allow_duplicate=True),
+    Output("upload-preview",     "children",allow_duplicate=True),
+    Output("extracted-events-store","data", allow_duplicate=True),
+    Output("planner-mode-bar",   "style"),
+    Output("chat-calendar-select","options"),
+    Input("send-btn",            "n_clicks"),
+    Input("chat-input",          "n_submit"),
+    Input("upload-doc",          "contents"),
+    Input("chat-cancel-upload",  "n_clicks"),
+    State("chat-input",          "value"),
+    State("chat-store",          "data"),
+    State("city-store",          "data"),
+    State("topics-check",        "value"),
+    State("pending-upload",      "data"),
+    State("extracted-events-store","data"),
+    State("chat-calendar-select","value"),
     prevent_initial_call=True,
 )
-def cb_chat(n_clicks, n_submit, user_text, history, city, topics):
-    user_text = user_text or ""
+def cb_chat(n_clicks, n_submit, upload_contents, n_cancel,
+            user_text, history, city, topics, pending, current_events, cal_target):
+
+    triggered   = ctx.triggered_id
+    city        = city   or "Barcelona"
+    topics      = topics or ["Tech","Finance"]
+    history     = history or []
+    user_text   = user_text or ""
+    bar_show    = {"display":"flex","alignItems":"center","gap":"8px","marginBottom":"8px",
+                   "padding":"8px 12px","background":"rgba(249,250,251,0.9)",
+                   "borderRadius":"8px","border":"1px solid #e2e8f0","flexWrap":"wrap"}
+    bar_hide    = {"display":"none"}
+
+    # ── Fetch calendar list for dropdown ──────────────────────────────────────
+    cal_opts = [{"label":"📅 Primary Calendar","value":"primary"}]
+    if GOOGLE_AVAILABLE and os.path.exists(TOKEN_FILE):
+        try:
+            creds   = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+            service = gapi_build("calendar","v3",credentials=creds)
+            clist   = service.calendarList().list().execute()
+            cal_opts = [{"label":f"🗓️ {c['summary']}","value":c["id"]}
+                        for c in clist.get("items",[]) if c.get("summary")]
+        except Exception:
+            pass
+
+    bubbles_base = [_bubble_ai(
+        "Hey! I'm WakeFlow 👋 Ask me anything, or **upload a file** 📎 "
+        "to extract your schedule and add it to Google Calendar!"
+    )]
+
+    # ── Cancel upload ─────────────────────────────────────────────────────────
+    if triggered == "chat-cancel-upload":
+        return (no_update, history, "", None, None, [], bar_hide, cal_opts)
+
+    # ── File uploaded ─────────────────────────────────────────────────────────
+    if triggered == "upload-doc" and upload_contents:
+        import base64, io
+        fname = "uploaded file"
+        try:
+            header, b64 = upload_contents.split(",", 1)
+            ext = "png"
+            if "pdf" in header: ext = "pdf"
+            elif "jpeg" in header or "jpg" in header: ext = "jpg"
+            decoded = base64.b64decode(b64)
+        except Exception:
+            return (no_update, history, "", None,
+                    dbc.Alert("Could not read file.", color="danger"),
+                    current_events, bar_hide, cal_opts)
+
+        # Extract events
+        events = []
+        if ext == "pdf":
+            try:
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(io.BytesIO(decoded)) as pdf:
+                        text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+                except ImportError:
+                    import PyPDF2
+                    reader = PyPDF2.PdfReader(io.BytesIO(decoded))
+                    text = "\n".join(p.extract_text() or "" for p in reader.pages)
+                if text.strip():
+                    events = extract_events_from_text(text)
+            except Exception as e:
+                events = []
+        else:
+            mime = f"image/{'jpeg' if ext=='jpg' else ext}"
+            events = extract_events_from_image(b64, mime)
+
+        # Show in chat
+        preview = html.Div(className="d-flex align-items-center gap-2 p-2 mb-1",
+                           style={"background":"rgba(255,255,255,0.6)","borderRadius":"8px",
+                                  "border":"1px solid #e2e8f0","maxWidth":"320px"},
+                           children=[
+                               html.Span("📄" if ext=="pdf" else "🖼️", style={"fontSize":"1.4rem"}),
+                               html.Div("File ready — select a calendar above and send",
+                                        style={"fontSize":"12px","color":"#64748b"}),
+                           ])
+
+        if events:
+            ev_list = "\n".join(
+                f"**{i+1}. {e.get('title','?')}** — {e.get('date','')} "
+                f"{e.get('start_time','') or 'All day'}"
+                f"{' @ '+e['location'] if e.get('location') else ''}"
+                for i, e in enumerate(events)
+            )
+            ai_msg = (f"📎 I found **{len(events)} event(s)**:\n\n{ev_list}\n\n"
+                      "💬 Tell me if anything looks wrong — I'll fix it before adding to your calendar!")
+            _google_ok = os.path.exists(TOKEN_FILE)
+            add_btn = html.Div(className="mt-2", children=[
+                dbc.Button(
+                    f"➕ Add {len(events)} event(s) to Google Calendar",
+                    id="add-all-events-btn", color="success", size="sm",
+                    n_clicks=0, disabled=not _google_ok,
+                ),
+                html.Div(id="add-events-status", className="mt-1", style={"fontSize":"12px"}),
+            ])
+            ai_bubble = html.Div(
+                className="wf-bubble wf-bubble-ai mb-2",
+                style={"alignSelf":"flex-start","maxWidth":"90%"},
+                children=[
+                    html.Div([html.Span("🤖 "), html.Span("WakeFlow",
+                              style={"fontSize":"11px","color":"#475569","fontWeight":"600"})],
+                             style={"marginBottom":"4px"}),
+                    dcc.Markdown(ai_msg, style={"margin":"0","fontSize":"13px","color":"#1e293b"}),
+                    add_btn,
+                ],
+            )
+        else:
+            ai_bubble = _bubble_ai(
+                "📎 I read the file but couldn't find events with clear dates and times.\n\n"
+                "Try typing a description and I'll help you create events manually!"
+            )
+
+        bubbles = bubbles_base.copy()
+        for m in history:
+            if m["role"] == "user":
+                display = m["content"].split("] ")[-1] if "] " in m["content"] else m["content"]
+                bubbles.append(_bubble_user(display))
+            elif m["role"] == "assistant":
+                bubbles.append(_bubble_ai(m["content"]))
+        bubbles.append(ai_bubble)
+
+        pending_data = {"contents": upload_contents, "filename": fname, "ext": ext, "b64": b64}
+        return (bubbles, history, "", pending_data, preview,
+                events if events else [], bar_show, cal_opts)
+
+    # ── Correction / normal chat ──────────────────────────────────────────────
     if not user_text.strip():
-        return no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update, no_update, no_update, cal_opts
 
-    city    = city    or "Barcelona"
-    topics  = topics  or ["Tech", "Finance"]
-    history = history or []
+    # If there are extracted events → treat message as correction
+    if current_events:
+        ev_json = json.dumps(current_events, ensure_ascii=False, indent=2)
+        correction_prompt = (
+            f"[TODAY: {datetime.now().strftime('%A %Y-%m-%d')}] "
+            f"The user previously uploaded a file and I extracted these events:\n"
+            f"```json\n{ev_json}\n```\n"
+            f"The user says: \"{user_text}\"\n"
+            f"Please:\n"
+            f"1. Acknowledge the correction naturally\n"
+            f"2. Show the UPDATED event list clearly\n"
+            f"3. End with asking if everything looks correct"
+        )
+        history.append({"role":"user","content":correction_prompt})
+        reply = chat_with_tools(history, city, topics)
+        history.append({"role":"assistant","content":reply})
+        bubbles = bubbles_base.copy()
+        for m in history:
+            if m["role"] == "user":
+                raw = m["content"]
+                if "The user says:" in raw:
+                    display = raw.split('The user says: "')[1].rstrip('"') if 'The user says:' in raw else raw
+                else:
+                    display = raw.split("] ")[-1] if "] " in raw else raw
+                bubbles.append(_bubble_user(display))
+            elif m["role"] == "assistant":
+                bubbles.append(_bubble_ai(m["content"]))
+        return (bubbles, history, "", pending, None, current_events, bar_show, cal_opts)
 
-    bubbles = [_bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
-                           "I'll check your calendar, weather, and news automatically.")]
-
+    # ── Normal chat ───────────────────────────────────────────────────────────
     today_tag = datetime.now().strftime("%A %Y-%m-%d")
     enriched  = f"[TODAY: {today_tag}] [CITY: {city}] [TOPICS: {', '.join(topics)}] {user_text}"
     history.append({"role":"user","content":enriched})
     reply = chat_with_tools(history, city, topics)
     history.append({"role":"assistant","content":reply})
 
+    bubbles = bubbles_base.copy()
     for m in history:
         if m["role"] == "user":
             display = m["content"].split("] ")[-1] if "] " in m["content"] else m["content"]
@@ -1936,7 +2048,7 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics):
         elif m["role"] == "assistant":
             bubbles.append(_bubble_ai(m["content"]))
 
-    return bubbles, history, ""
+    return (bubbles, history, "", pending, None, current_events or [], bar_hide, cal_opts)
 
 
 @callback(
@@ -2069,19 +2181,17 @@ def cb_news(topics):
 @callback(
     Output("email-status",  "children"),
     Input("send-email-btn", "n_clicks"),
-    State("email-input",       "value"),
-    State("user-name-input",   "value"),
-    State("gmail-user-input",  "value"),
-    State("gmail-pass-input",  "value"),
-    State("city-store",        "data"),
-    State("topics-check",      "value"),
+    State("email-input",     "value"),
+    State("user-name-input", "value"),
+    State("city-store",      "data"),
+    State("topics-check",    "value"),
     prevent_initial_call=True,
 )
-def cb_send_email(n, recipient, user_name, gmail_user, gmail_pass, city, topics):
+def cb_send_email(n, recipient, user_name, city, topics):
     if not recipient:
-        return dbc.Alert("กรุณาใส่อีเมลปลายทางก่อน", color="warning")
+        return dbc.Alert("Please enter a recipient email address.", color="warning")
     if not BREVO_API_KEY:
-        return dbc.Alert("❌ ยังไม่ได้ตั้งค่า BREVO_API_KEY ใน Railway Variables", color="danger")
+        return dbc.Alert("❌ BREVO_API_KEY not set in Railway Variables", color="danger")
     ok, msg = send_email(recipient, city or "Barcelona", topics or ["Tech","Finance"],
                          user_name=user_name or "")
     return dbc.Alert(msg, color="success" if ok else "danger", dismissable=True)
@@ -2093,20 +2203,16 @@ def cb_send_email(n, recipient, user_name, gmail_user, gmail_pass, city, topics)
     Input("save-schedule-btn",   "n_clicks"),
     State("email-input",         "value"),
     State("user-name-input",     "value"),
-    State("gmail-user-input",    "value"),
-    State("gmail-pass-input",    "value"),
     State("email-time-dropdown", "value"),
     State("city-store",          "data"),
     State("topics-check",        "value"),
     prevent_initial_call=True,
 )
-def cb_save_schedule(n, recipient, user_name, gmail_user, gmail_pass, hour, city, topics):
-    sender   = gmail_user or GMAIL_SENDER
-    password = gmail_pass or GMAIL_APP_PASSWORD
+def cb_save_schedule(n, recipient, user_name, hour, city, topics):
     if not recipient:
         return dbc.Alert("Please enter a recipient email address.", color="warning"), no_update
-    if not sender or not password:
-        return dbc.Alert("Email sender not configured.", color="danger"), no_update
+    if not BREVO_API_KEY:
+        return dbc.Alert("❌ BREVO_API_KEY not set in Railway Variables", color="danger"), no_update
 
     if _scheduled_job["job"]:
         try:
@@ -2119,20 +2225,19 @@ def cb_save_schedule(n, recipient, user_name, gmail_user, gmail_pass, hour, city
     user_name = user_name or ""
 
     def _send():
-        send_email(recipient, city, topics, gmail_user=sender,
-                   gmail_password=password, user_name=user_name)
+        send_email(recipient, city, topics, user_name=user_name)
 
     job = scheduler.add_job(_send, trigger="cron", hour=hour, minute=0,
                             id="daily_briefing", replace_existing=True)
     _scheduled_job["job"] = job
 
     info = html.Div([
-        html.Span("⏰ Scheduled: ", style={"color":"#34d399","fontWeight":"600"}),
-        html.Span(f"Daily at {hour:02d}:00", style={"color":"#e2e8f0"}), html.Br(),
+        html.Span("⏰ Scheduled: ", style={"fontWeight":"600","color":"#0b8043"}),
+        html.Span(f"Daily at {hour:02d}:00", style={"color":"#374151"}), html.Br(),
         html.Span("📬 To: ", style={"color":"#475569"}),
-        html.Span(recipient, style={"color":"#e2e8f0"}),
+        html.Span(recipient, style={"color":"#374151"}),
     ])
-    return (dbc.Alert(f"✅ Schedule saved! Briefing will send daily at {hour:02d}:00.",
+    return (dbc.Alert(f"✅ Schedule saved! Daily briefing at {hour:02d}:00.",
                       color="success", dismissable=True), info)
 
 
@@ -2178,7 +2283,7 @@ def cb_toggle_task(checked_values, tasks):
     if not tasks or not ctx.triggered_id:
         return no_update
     triggered_idx = ctx.triggered_id["index"]
-    # หา position ใน inputs_list ที่ตรงกับ index ที่ trigger
+    # Find position in inputs_list matching the triggered index
     all_inputs = ctx.inputs_list[0]
     pos = next((i for i, inp in enumerate(all_inputs)
                 if inp["id"]["index"] == triggered_idx), None)
@@ -2253,45 +2358,7 @@ def cb_render_tasks(tasks):
     return html.Div(sections)
 
 
-# ── Topic = Google Calendar list ────────────────────────────────────────────────
-@callback(
-    Output("planner-topic-dropdown", "options"),
-    Input("gcal-status-interval",    "n_intervals"),
-)
-def cb_load_calendar_topics(n):
-    """Load calendar names from Google Calendar as topic options."""
-    default_opts = [{"label": "📝 Personal", "value": "Personal"}]
-    if not (GOOGLE_AVAILABLE and os.path.exists(TOKEN_FILE)):
-        return default_opts
-    try:
-        creds    = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
-        service  = gapi_build("calendar", "v3", credentials=creds)
-        cal_list = service.calendarList().list().execute()
-        opts = []
-        for cal in cal_list.get("items", []):
-            name = cal.get("summary", "")
-            if not name or name.lower() in ("holidays in thailand","holidays in spain","週末"):
-                continue
-            opts.append({"label": f"🗓️ {name}", "value": name})
-        return opts if opts else default_opts
-    except Exception:
-        return default_opts
-
-
-@callback(
-    Output("planner-new-topic",     "value"),
-    Input("planner-add-topic-btn",  "n_clicks"),
-    State("planner-new-topic",      "value"),
-    State("planner-topic-dropdown", "options"),
-    prevent_initial_call=True,
-)
-def cb_add_topic(n, new_topic, options):
-    if not new_topic or not new_topic.strip():
-        return no_update
-    return ""
-
-
-# ── My Planner Callbacks ─────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 @callback(
     Output("planner-result",         "children"),
     Output("extracted-events-store", "data"),
