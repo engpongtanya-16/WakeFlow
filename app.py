@@ -1323,7 +1323,54 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         # ── Tab 2: My Planner ────────────────────────────────────────────────
         dbc.Tab(tab_id="tab-planner", label="📋 My Planner", children=[
             dbc.Row(className="mt-3 g-3", children=[
-                dbc.Col(width=8, children=[
+
+                # ── Upload + Calendar selector ───────────────────────────────
+                dbc.Col(width=6, children=[
+                    html.Div(style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                        "marginBottom":"16px",
+                    }, children=[
+                        html.H6("📎 Upload File to Calendar",
+                                style={"fontWeight":"700","color":"#1e293b","marginBottom":"8px"}),
+                        html.P("Upload a PDF or image — AI will extract your events and add them to Google Calendar.",
+                               style={"fontSize":"13px","color":"#64748b","marginBottom":"12px"}),
+
+                        # Calendar selector
+                        html.Div(className="d-flex align-items-center gap-2 mb-3 flex-wrap", children=[
+                            html.Span("🗓️", style={"fontSize":"14px","color":"#64748b"}),
+                            dcc.Dropdown(
+                                id="planner-topic-dropdown",
+                                options=[{"label":"📅 Primary Calendar","value":"primary"}],
+                                placeholder="Select target calendar...",
+                                clearable=True,
+                                style={"flex":"1","fontSize":"13px","minWidth":"180px"},
+                            ),
+                        ]),
+
+                        dcc.Upload(
+                            id="planner-upload",
+                            children=html.Div([
+                                html.Div("📂", style={"fontSize":"2rem","marginBottom":"6px"}),
+                                html.Div("Drag & drop or click to upload",
+                                         style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
+                                html.Div("PDF, PNG, JPG supported",
+                                         style={"fontSize":"11px","color":"#94a3b8","marginTop":"2px"}),
+                            ], style={"textAlign":"center","padding":"24px 16px"}),
+                            accept=".pdf,.png,.jpg,.jpeg",
+                            multiple=False,
+                            style={
+                                "border":"2px dashed #cbd5e1","borderRadius":"12px",
+                                "background":"rgba(249,250,251,0.8)","cursor":"pointer",
+                            },
+                        ),
+                        dcc.Loading(type="circle", color="#f97316",
+                                    children=html.Div(id="planner-result", className="mt-3")),
+                    ]),
+                ]),
+
+                # ── Task Manager ─────────────────────────────────────────────
+                dbc.Col(width=6, children=[
                     html.Div(style={
                         "background":"white","borderRadius":"12px",
                         "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
@@ -1331,8 +1378,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
                             html.Span("✅", style={"fontSize":"1.3rem"}),
                             html.H6("My Tasks", style={"fontWeight":"700","color":"#1e293b","margin":"0"}),
-                            html.Small("Upload files via AI Assistant tab to link to calendars",
-                                       style={"color":"#94a3b8","fontSize":"11px","marginLeft":"8px"}),
                         ]),
                         html.Div(className="d-flex gap-2 mb-3", children=[
                             dcc.Dropdown(
@@ -1366,54 +1411,13 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         dbc.Tab(tab_id="tab-chat", label="💬 AI Assistant", children=[
             dbc.Row(className="mt-3 g-3", children=[
                 dbc.Col(width=10, children=[
-                    # Planner mode bar — shown when file is uploaded
-                    html.Div(id="planner-mode-bar", style={"display":"none"},
-                             className="d-flex align-items-center gap-2 mb-2 p-2 flex-wrap",
-                             children=[
-                        html.Span("🗓️", style={"fontSize":"14px"}),
-                        html.Span("Adding to:", style={"fontSize":"12px","color":"#64748b","fontWeight":"600"}),
-                        dcc.Dropdown(
-                            id="chat-calendar-select",
-                            options=[{"label":"📅 Primary Calendar","value":"primary"}],
-                            value="primary",
-                            clearable=False,
-                            style={"width":"220px","fontSize":"12px"},
-                            placeholder="Select target calendar...",
-                        ),
-                        dbc.Button("✕ Cancel upload", id="chat-cancel-upload",
-                                   color="light", size="sm", n_clicks=0,
-                                   style={"fontSize":"11px","marginLeft":"auto"}),
-                    ]),
-                    dcc.Store(id="pending-upload", data=None),
-
-                    # Chat window
                     html.Div(id="chat-window", children=[
-                        _bubble_ai(
-                            "Hey! I'm WakeFlow 👋 Ask me anything, or **upload a file** 📎 "
-                            "to extract your schedule and add it to Google Calendar!"
-                        ),
+                        _bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
+                                   "I'll check your calendar, weather, and news automatically."),
                     ]),
-
-                    # Upload preview
-                    html.Div(id="upload-preview", className="mt-1"),
-
-                    # Input area
                     dbc.InputGroup(className="mt-2", children=[
-                        dcc.Upload(
-                            id="upload-doc",
-                            children=dbc.Button(
-                                "📎", color="light", size="sm",
-                                title="Upload PDF or image to extract events",
-                                style={"height":"38px","width":"38px","padding":"0",
-                                       "fontSize":"16px","border":"1px solid #dee2e6",
-                                       "borderRadius":"8px 0 0 8px","display":"flex",
-                                       "alignItems":"center","justifyContent":"center"},
-                            ),
-                            accept=".pdf,.png,.jpg,.jpeg",
-                            multiple=False,
-                        ),
                         dbc.Input(id="chat-input",
-                                  placeholder="Ask about your day, or type to correct extracted events...",
+                                  placeholder="Ask about your day...",
                                   type="text", className="wf-input",
                                   debounce=False, n_submit=0),
                         dbc.Button("Send ↑", id="send-btn", color="warning",
@@ -1852,195 +1856,35 @@ def cb_show_map(n, loc_data):
 
 
 @callback(
-    Output("chat-window",        "children"),
-    Output("chat-store",         "data"),
-    Output("chat-input",         "value"),
-    Output("pending-upload",     "data",    allow_duplicate=True),
-    Output("upload-preview",     "children",allow_duplicate=True),
-    Output("extracted-events-store","data", allow_duplicate=True),
-    Output("planner-mode-bar",   "style"),
-    Output("chat-calendar-select","options"),
-    Input("send-btn",            "n_clicks"),
-    Input("chat-input",          "n_submit"),
-    Input("upload-doc",          "contents"),
-    Input("chat-cancel-upload",  "n_clicks"),
-    State("chat-input",          "value"),
-    State("chat-store",          "data"),
-    State("city-store",          "data"),
-    State("topics-check",        "value"),
-    State("pending-upload",      "data"),
-    State("extracted-events-store","data"),
-    State("chat-calendar-select","value"),
+    Output("chat-window",  "children"),
+    Output("chat-store",   "data"),
+    Output("chat-input",   "value"),
+    Input("send-btn",      "n_clicks"),
+    Input("chat-input",    "n_submit"),
+    State("chat-input",    "value"),
+    State("chat-store",    "data"),
+    State("city-store",    "data"),
+    State("topics-check",  "value"),
     prevent_initial_call=True,
 )
-def cb_chat(n_clicks, n_submit, upload_contents, n_cancel,
-            user_text, history, city, topics, pending, current_events, cal_target):
-
-    triggered   = ctx.triggered_id
-    city        = city   or "Barcelona"
-    topics      = topics or ["Tech","Finance"]
-    history     = history or []
-    user_text   = user_text or ""
-    bar_show    = {"display":"flex","alignItems":"center","gap":"8px","marginBottom":"8px",
-                   "padding":"8px 12px","background":"rgba(249,250,251,0.9)",
-                   "borderRadius":"8px","border":"1px solid #e2e8f0","flexWrap":"wrap"}
-    bar_hide    = {"display":"none"}
-
-    # ── Fetch calendar list for dropdown ──────────────────────────────────────
-    cal_opts = [{"label":"📅 Primary Calendar","value":"primary"}]
-    if GOOGLE_AVAILABLE and os.path.exists(TOKEN_FILE):
-        try:
-            creds   = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
-            service = gapi_build("calendar","v3",credentials=creds)
-            clist   = service.calendarList().list().execute()
-            cal_opts = [{"label":f"🗓️ {c['summary']}","value":c["id"]}
-                        for c in clist.get("items",[]) if c.get("summary")]
-        except Exception:
-            pass
-
-    bubbles_base = [_bubble_ai(
-        "Hey! I'm WakeFlow 👋 Ask me anything, or **upload a file** 📎 "
-        "to extract your schedule and add it to Google Calendar!"
-    )]
-
-    # ── Cancel upload ─────────────────────────────────────────────────────────
-    if triggered == "chat-cancel-upload":
-        return (no_update, history, "", None, None, [], bar_hide, cal_opts)
-
-    # ── File uploaded ─────────────────────────────────────────────────────────
-    if triggered == "upload-doc" and upload_contents:
-        import base64, io
-        fname = "uploaded file"
-        try:
-            header, b64 = upload_contents.split(",", 1)
-            ext = "png"
-            if "pdf" in header: ext = "pdf"
-            elif "jpeg" in header or "jpg" in header: ext = "jpg"
-            decoded = base64.b64decode(b64)
-        except Exception:
-            return (no_update, history, "", None,
-                    dbc.Alert("Could not read file.", color="danger"),
-                    current_events, bar_hide, cal_opts)
-
-        # Extract events
-        events = []
-        if ext == "pdf":
-            try:
-                try:
-                    import pdfplumber
-                    with pdfplumber.open(io.BytesIO(decoded)) as pdf:
-                        text = "\n".join(p.extract_text() or "" for p in pdf.pages)
-                except ImportError:
-                    import PyPDF2
-                    reader = PyPDF2.PdfReader(io.BytesIO(decoded))
-                    text = "\n".join(p.extract_text() or "" for p in reader.pages)
-                if text.strip():
-                    events = extract_events_from_text(text)
-            except Exception as e:
-                events = []
-        else:
-            mime = f"image/{'jpeg' if ext=='jpg' else ext}"
-            events = extract_events_from_image(b64, mime)
-
-        # Show in chat
-        preview = html.Div(className="d-flex align-items-center gap-2 p-2 mb-1",
-                           style={"background":"rgba(255,255,255,0.6)","borderRadius":"8px",
-                                  "border":"1px solid #e2e8f0","maxWidth":"320px"},
-                           children=[
-                               html.Span("📄" if ext=="pdf" else "🖼️", style={"fontSize":"1.4rem"}),
-                               html.Div("File ready — select a calendar above and send",
-                                        style={"fontSize":"12px","color":"#64748b"}),
-                           ])
-
-        if events:
-            ev_list = "\n".join(
-                f"**{i+1}. {e.get('title','?')}** — {e.get('date','')} "
-                f"{e.get('start_time','') or 'All day'}"
-                f"{' @ '+e['location'] if e.get('location') else ''}"
-                for i, e in enumerate(events)
-            )
-            ai_msg = (f"📎 I found **{len(events)} event(s)**:\n\n{ev_list}\n\n"
-                      "💬 Tell me if anything looks wrong — I'll fix it before adding to your calendar!")
-            _google_ok = os.path.exists(TOKEN_FILE)
-            add_btn = html.Div(className="mt-2", children=[
-                dbc.Button(
-                    f"➕ Add {len(events)} event(s) to Google Calendar",
-                    id="add-all-events-btn", color="success", size="sm",
-                    n_clicks=0, disabled=not _google_ok,
-                ),
-                html.Div(id="add-events-status", className="mt-1", style={"fontSize":"12px"}),
-            ])
-            ai_bubble = html.Div(
-                className="wf-bubble wf-bubble-ai mb-2",
-                style={"alignSelf":"flex-start","maxWidth":"90%"},
-                children=[
-                    html.Div([html.Span("🤖 "), html.Span("WakeFlow",
-                              style={"fontSize":"11px","color":"#475569","fontWeight":"600"})],
-                             style={"marginBottom":"4px"}),
-                    dcc.Markdown(ai_msg, style={"margin":"0","fontSize":"13px","color":"#1e293b"}),
-                    add_btn,
-                ],
-            )
-        else:
-            ai_bubble = _bubble_ai(
-                "📎 I read the file but couldn't find events with clear dates and times.\n\n"
-                "Try typing a description and I'll help you create events manually!"
-            )
-
-        bubbles = bubbles_base.copy()
-        for m in history:
-            if m["role"] == "user":
-                display = m["content"].split("] ")[-1] if "] " in m["content"] else m["content"]
-                bubbles.append(_bubble_user(display))
-            elif m["role"] == "assistant":
-                bubbles.append(_bubble_ai(m["content"]))
-        bubbles.append(ai_bubble)
-
-        pending_data = {"contents": upload_contents, "filename": fname, "ext": ext, "b64": b64}
-        return (bubbles, history, "", pending_data, preview,
-                events if events else [], bar_show, cal_opts)
-
-    # ── Correction / normal chat ──────────────────────────────────────────────
+def cb_chat(n_clicks, n_submit, user_text, history, city, topics):
+    user_text = user_text or ""
     if not user_text.strip():
-        return no_update, no_update, no_update, no_update, no_update, no_update, no_update, cal_opts
+        return no_update, no_update, no_update
 
-    # If there are extracted events → treat message as correction
-    if current_events:
-        ev_json = json.dumps(current_events, ensure_ascii=False, indent=2)
-        correction_prompt = (
-            f"[TODAY: {datetime.now().strftime('%A %Y-%m-%d')}] "
-            f"The user previously uploaded a file and I extracted these events:\n"
-            f"```json\n{ev_json}\n```\n"
-            f"The user says: \"{user_text}\"\n"
-            f"Please:\n"
-            f"1. Acknowledge the correction naturally\n"
-            f"2. Show the UPDATED event list clearly\n"
-            f"3. End with asking if everything looks correct"
-        )
-        history.append({"role":"user","content":correction_prompt})
-        reply = chat_with_tools(history, city, topics)
-        history.append({"role":"assistant","content":reply})
-        bubbles = bubbles_base.copy()
-        for m in history:
-            if m["role"] == "user":
-                raw = m["content"]
-                if "The user says:" in raw:
-                    display = raw.split('The user says: "')[1].rstrip('"') if 'The user says:' in raw else raw
-                else:
-                    display = raw.split("] ")[-1] if "] " in raw else raw
-                bubbles.append(_bubble_user(display))
-            elif m["role"] == "assistant":
-                bubbles.append(_bubble_ai(m["content"]))
-        return (bubbles, history, "", pending, None, current_events, bar_show, cal_opts)
+    city    = city    or "Barcelona"
+    topics  = topics  or ["Tech","Finance"]
+    history = history or []
 
-    # ── Normal chat ───────────────────────────────────────────────────────────
+    bubbles = [_bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
+                           "I'll check your calendar, weather, and news automatically.")]
+
     today_tag = datetime.now().strftime("%A %Y-%m-%d")
     enriched  = f"[TODAY: {today_tag}] [CITY: {city}] [TOPICS: {', '.join(topics)}] {user_text}"
     history.append({"role":"user","content":enriched})
     reply = chat_with_tools(history, city, topics)
     history.append({"role":"assistant","content":reply})
 
-    bubbles = bubbles_base.copy()
     for m in history:
         if m["role"] == "user":
             display = m["content"].split("] ")[-1] if "] " in m["content"] else m["content"]
@@ -2048,7 +1892,27 @@ def cb_chat(n_clicks, n_submit, upload_contents, n_cancel,
         elif m["role"] == "assistant":
             bubbles.append(_bubble_ai(m["content"]))
 
-    return (bubbles, history, "", pending, None, current_events or [], bar_hide, cal_opts)
+    return bubbles, history, ""
+
+
+# ── Planner calendar dropdown (load from Google Calendar) ─────────────────────
+@callback(
+    Output("planner-topic-dropdown", "options"),
+    Input("gcal-status-interval",    "n_intervals"),
+)
+def cb_load_planner_calendars(n):
+    default = [{"label":"📅 Primary Calendar","value":"primary"}]
+    if not (GOOGLE_AVAILABLE and os.path.exists(TOKEN_FILE)):
+        return default
+    try:
+        creds    = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        service  = gapi_build("calendar","v3",credentials=creds)
+        cal_list = service.calendarList().list().execute()
+        opts = [{"label":f"🗓️ {c['summary']}","value":c["id"]}
+                for c in cal_list.get("items",[]) if c.get("summary")]
+        return opts if opts else default
+    except Exception:
+        return default
 
 
 @callback(
