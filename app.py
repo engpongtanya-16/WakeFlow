@@ -1312,9 +1312,45 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                            className="wf-hint mt-1"),
                 ]),
                 dbc.Col(width=4, children=[
-                    html.Div(id="event-panel", className="wf-card", style={"minHeight":"300px"}, children=[
-                        html.Div("🤖", style={"fontSize":"2rem","marginBottom":"8px"}),
-                        html.P("Click an event on the chart →", style={"color":"#475569","fontSize":"13px"}),
+                    # Event tips (shown when event clicked)
+                    html.Div(id="event-panel", style={"display":"none"},
+                             className="wf-card mb-3"),
+
+                    # AI Chat (always visible)
+                    html.Div(style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"16px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                    }, children=[
+                        html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
+                            html.Span("🤖", style={"fontSize":"1.1rem"}),
+                            html.Span("AI Assistant", style={
+                                "fontWeight":"700","fontSize":"14px","color":"#1e293b"}),
+                        ]),
+                        html.Div(id="chat-window",
+                                 style={"height":"320px","overflowY":"auto","marginBottom":"8px"},
+                                 children=[
+                            _bubble_ai("Hey! 👋 Ask me about your schedule, weather, or anything else!"),
+                        ]),
+                        dbc.InputGroup(children=[
+                            dbc.Input(id="chat-input",
+                                      placeholder="Ask about your day...",
+                                      type="text", className="wf-input",
+                                      debounce=False, n_submit=0,
+                                      style={"fontSize":"13px"}),
+                            dbc.Button("↑", id="send-btn", color="warning",
+                                       n_clicks=0, style={"fontWeight":"700"}),
+                        ]),
+                        html.Div(className="d-flex align-items-center gap-2 mt-2", children=[
+                            html.Small("Rate:", style={"color":"#64748b","fontSize":"11px"}),
+                            dbc.Button("👍", id="vote-up-btn", size="sm",
+                                       color="outline-success", n_clicks=0, className="vote-btn"),
+                            dbc.Button("👎", id="vote-down-btn", size="sm",
+                                       color="outline-danger", n_clicks=0, className="vote-btn"),
+                            html.Div(id="vote-status",
+                                     style={"fontSize":"11px","color":"#34d399"}),
+                            html.Div(id="vote-stats", className="ms-auto",
+                                     style={"display":"none"}),
+                        ]),
                     ]),
                 ]),
             ]),
@@ -1379,7 +1415,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                             html.Span("✅", style={"fontSize":"1.3rem"}),
                             html.H6("My Tasks", style={"fontWeight":"700","color":"#1e293b","margin":"0"}),
                         ]),
-                        html.Div(className="d-flex gap-2 mb-3", children=[
+                        html.Div(className="d-flex gap-2 mb-2 flex-wrap", children=[
                             dcc.Dropdown(
                                 id="task-category-select",
                                 options=[
@@ -1389,53 +1425,29 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                                     {"label":"🏠 Personal",    "value":"personal"},
                                 ],
                                 value="todo", clearable=False,
-                                style={"width":"150px","fontSize":"12px"},
+                                style={"width":"145px","fontSize":"12px"},
                             ),
                             dbc.Input(
                                 id="task-input",
                                 placeholder="Add a new task...",
                                 type="text", size="sm", n_submit=0,
-                                className="wf-input", style={"fontSize":"13px"},
+                                className="wf-input", style={"fontSize":"13px","flex":"1"},
                             ),
                             dbc.Button("➕", id="task-add-btn",
                                        color="warning", size="sm", n_clicks=0),
                         ]),
+                        html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
+                            html.Small("Due:", style={"color":"#64748b","fontSize":"12px","whiteSpace":"nowrap"}),
+                            dcc.DatePickerSingle(
+                                id="task-due-date",
+                                placeholder="No due date",
+                                display_format="D MMM YYYY",
+                                clearable=True,
+                                style={"fontSize":"12px"},
+                            ),
+                        ]),
                         html.Div(id="task-list-display"),
                         dcc.Store(id="task-store", data=[]),
-                    ]),
-                ]),
-            ]),
-        ]),
-
-        # ── Tab 3: AI Assistant ──────────────────────────────────────────────
-        dbc.Tab(tab_id="tab-chat", label="💬 AI Assistant", children=[
-            dbc.Row(className="mt-3 g-3", children=[
-                dbc.Col(width=10, children=[
-                    html.Div(id="chat-window", children=[
-                        _bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
-                                   "I'll check your calendar, weather, and news automatically."),
-                    ]),
-                    dbc.InputGroup(className="mt-2", children=[
-                        dbc.Input(id="chat-input",
-                                  placeholder="Ask about your day...",
-                                  type="text", className="wf-input",
-                                  debounce=False, n_submit=0),
-                        dbc.Button("Send ↑", id="send-btn", color="warning",
-                                   n_clicks=0, className="wf-send-btn"),
-                    ]),
-
-                    # AI Response Voting
-                    html.Div(className="d-flex align-items-center gap-2 mt-2", children=[
-                        html.Small("Rate last response:",
-                                   style={"color":"#64748b","fontSize":"12px","fontWeight":"500"}),
-                        dbc.Button("👍", id="vote-up-btn", size="sm",
-                                   color="outline-success", n_clicks=0, className="vote-btn"),
-                        dbc.Button("👎", id="vote-down-btn", size="sm",
-                                   color="outline-danger", n_clicks=0, className="vote-btn"),
-                        html.Div(id="vote-status",
-                                 style={"fontSize":"12px","color":"#34d399","fontWeight":"500"}),
-                        html.Div(id="vote-stats", className="ms-auto",
-                                 style={"display":"none"}),
                     ]),
                 ]),
             ]),
@@ -1721,6 +1733,7 @@ def cb_update_gantt(active_tab, day_date, week_date, sel_month, sel_year):
 
 @callback(
     Output("event-panel",    "children"),
+    Output("event-panel",    "style"),
     Output("location-store", "data"),
     Input("gantt-chart",     "clickData"),
     State("events-store",    "data"),
@@ -1729,15 +1742,15 @@ def cb_update_gantt(active_tab, day_date, week_date, sel_month, sel_year):
 )
 def cb_click_event(click_data, events, city):
     if not click_data or not events:
-        return no_update, no_update
+        return no_update, {"display":"none"}, no_update
     try:
         title = click_data["points"][0]["customdata"][0]
     except (KeyError, IndexError):
-        return no_update, no_update
+        return no_update, {"display":"none"}, no_update
 
     event = next((e for e in events if e["title"] == title), None)
     if not event:
-        return no_update, no_update
+        return no_update, {"display":"none"}, no_update
 
     w       = get_weather(city or "Barcelona")
     ai_text = ""
@@ -1816,7 +1829,7 @@ def cb_click_event(click_data, events, city):
                style={"color":"#374151","fontSize":"12px","marginBottom":"10px"}),
         dcc.Markdown(ai_text, style={"color":"#e2e8f0","fontSize":"13px","lineHeight":"1.7"}),
         map_section,
-    ]), loc_data
+    ]), {"display":"block"}, loc_data
 
 
 @callback(
@@ -2116,16 +2129,18 @@ CAT_COLORS = {
 @callback(
     Output("task-store",        "data"),
     Output("task-input",        "value"),
+    Output("task-due-date",     "date"),
     Input("task-add-btn",       "n_clicks"),
     Input("task-input",         "n_submit"),
     State("task-input",         "value"),
     State("task-category-select","value"),
+    State("task-due-date",      "date"),
     State("task-store",         "data"),
     prevent_initial_call=True,
 )
-def cb_add_task(n_btn, n_sub, text, category, tasks):
+def cb_add_task(n_btn, n_sub, text, category, due_date, tasks):
     if not text or not text.strip():
-        return no_update, no_update
+        return no_update, no_update, no_update
     tasks = tasks or []
     new_id = max((t["id"] for t in tasks), default=-1) + 1
     tasks.append({
@@ -2133,8 +2148,9 @@ def cb_add_task(n_btn, n_sub, text, category, tasks):
         "text":     text.strip(),
         "category": category or "todo",
         "done":     False,
+        "due":      str(due_date) if due_date else None,
     })
-    return tasks, ""
+    return tasks, "", None
 
 
 @callback(
@@ -2183,6 +2199,7 @@ def cb_render_tasks(tasks):
         return html.P("No tasks yet — add one above! 🎯",
                       style={"color":"#94a3b8","fontSize":"13px","textAlign":"center","marginTop":"20px"})
 
+    today = datetime.now().date()
     cats = {}
     for t in tasks:
         cats.setdefault(t["category"], []).append(t)
@@ -2199,6 +2216,30 @@ def cb_render_tasks(tasks):
         rows = []
         for t in items:
             done = t["done"]
+
+            # Due date badge
+            due_badge = html.Span()
+            if t.get("due") and not done:
+                try:
+                    due_d = datetime.fromisoformat(t["due"]).date()
+                    days_left = (due_d - today).days
+                    if days_left < 0:
+                        due_label = f"⚠️ Overdue {abs(days_left)}d"
+                        due_color = "danger"
+                    elif days_left == 0:
+                        due_label = "⏰ Due today"
+                        due_color = "warning"
+                    elif days_left <= 3:
+                        due_label = f"📅 {days_left}d left"
+                        due_color = "warning"
+                    else:
+                        due_label = f"📅 {due_d.strftime('%-d %b')}"
+                        due_color = "secondary"
+                    due_badge = dbc.Badge(due_label, color=due_color,
+                                          style={"fontSize":"10px","marginLeft":"4px"})
+                except Exception:
+                    pass
+
             rows.append(html.Div(className="d-flex align-items-center gap-2 py-1", style={
                 "borderBottom":"1px solid #f1f5f9",
             }, children=[
@@ -2208,11 +2249,13 @@ def cb_render_tasks(tasks):
                     id={"type":"task-check","index":t["id"]},
                     inline=True, style={"margin":"0"},
                 ),
-                html.Span(t["text"], style={
-                    "fontSize":"13px","color":"#94a3b8" if done else "#1e293b",
-                    "textDecoration":"line-through" if done else "none",
-                    "flex":"1",
-                }),
+                html.Div([
+                    html.Span(t["text"], style={
+                        "fontSize":"13px","color":"#94a3b8" if done else "#1e293b",
+                        "textDecoration":"line-through" if done else "none",
+                    }),
+                    due_badge,
+                ], style={"flex":"1"}),
                 html.Span("✕", id={"type":"task-delete","index":t["id"]},
                           style={"cursor":"pointer","color":"#cbd5e1","fontSize":"12px","padding":"0 4px"},
                           n_clicks=0),
