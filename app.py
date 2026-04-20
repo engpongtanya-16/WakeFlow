@@ -1367,7 +1367,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         # Topic selector + manager
                         html.Div(className="d-flex align-items-center gap-2 mb-3 flex-wrap", children=[
                             dcc.Dropdown(
-                                id="planner-topic-select",
+                                id="planner-topic-dropdown",
                                 options=[
                                     {"label":"📚 PDAI",      "value":"PDAI"},
                                     {"label":"💼 TWD",       "value":"TWD"},
@@ -1378,7 +1378,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                                 placeholder="เลือกหัวข้อ / วิชา...",
                                 clearable=True,
                                 style={"width":"200px","fontSize":"13px"},
-                                id="planner-topic-dropdown",
                             ),
                             dbc.Input(
                                 id="planner-new-topic",
