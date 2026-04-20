@@ -57,7 +57,7 @@ GOOGLE_SCOPES = [
 
 GMAIL_SENDER       = os.getenv("GMAIL_SENDER", "")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
-RESEND_API_KEY     = os.getenv("RESEND_API_KEY", "")
+SENDGRID_API_KEY   = os.getenv("SENDGRID_API_KEY", "")
 
 try:
     from google.oauth2.credentials import Credentials
@@ -1030,10 +1030,10 @@ def _build_email_html(city: str, topics: list, user_name: str = "") -> str:
 def send_email(recipient: str, city: str, topics: list,
                gmail_user: str = "", gmail_password: str = "",
                user_name: str = "") -> tuple[bool, str]:
-    """ส่งอีเมลผ่าน Resend API (ทำงานได้บน Railway)"""
-    api_key = RESEND_API_KEY
+    """ส่งอีเมลผ่าน SendGrid API (ทำงานได้บน Railway)"""
+    api_key = SENDGRID_API_KEY
     if not api_key:
-        return False, "❌ ยังไม่ได้ตั้งค่า RESEND_API_KEY ใน Railway Variables"
+        return False, "❌ ยังไม่ได้ตั้งค่า SENDGRID_API_KEY ใน Railway Variables"
     try:
         html_content = _build_email_html(city, topics, user_name=user_name)
         html_content = (html_content
@@ -1043,23 +1043,23 @@ def send_email(recipient: str, city: str, topics: list,
         )
         subject = f"WakeFlow · {datetime.now().strftime('%A, %B %d')}"
         resp = requests.post(
-            "https://api.resend.com/emails",
+            "https://api.sendgrid.com/v3/mail/send",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={
-                "from": "WakeFlow <onboarding@resend.dev>",
-                "to": [recipient],
+                "personalizations": [{"to": [{"email": recipient}]}],
+                "from": {"email": "wakeflow1303@gmail.com", "name": "WakeFlow"},
                 "subject": subject,
-                "html": html_content,
+                "content": [{"type": "text/html", "value": html_content}],
             },
             timeout=15,
         )
-        if resp.status_code in (200, 201):
+        if resp.status_code == 202:
             return True, f"✅ Briefing sent to {recipient}!"
         else:
-            return False, f"❌ Resend error {resp.status_code}: {resp.text[:200]}"
+            return False, f"❌ SendGrid error {resp.status_code}: {resp.text[:200]}"
     except Exception as e:
         return False, f"❌ {str(e)[:200]}"
 
@@ -1480,31 +1480,9 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         html.P("Connect your Google account to sync your calendar events with WakeFlow.",
                                style={"fontSize":"13px","color":"#64748b","marginBottom":"16px"}),
 
-                        dbc.Alert(
-                            [html.Span("✅  "), "Google Calendar is connected!"],
-                            color="success", className="py-2 mb-3",
-                        ) if os.path.exists(TOKEN_FILE) else html.Div([
-                            dbc.Label("Google account email to connect",
-                                      style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
-                            dbc.Input(
-                                id="gcal-email-input", type="email",
-                                placeholder="yourname@gmail.com",
-                                className="wf-input mb-3",
-                            ),
-                            html.A(
-                                dbc.Button("🔌 Connect Google Calendar",
-                                           color="primary", size="sm"),
-                                href="/connect-google", target="_blank",
-                            ),
-                        ]),
-
-                        html.Div([
-                            html.A(
-                                html.Small("Reconnect with a different account →",
-                                           style={"color":"#94a3b8","fontSize":"11px"}),
-                                href="/connect-google", target="_blank",
-                            ),
-                        ]) if os.path.exists(TOKEN_FILE) else html.Div(),
+                        # Dynamic status — updated by callback
+                        html.Div(id="gcal-status-section"),
+                        dcc.Interval(id="gcal-status-interval", interval=3000, n_intervals=0),
                     ]),
 
                     # ── City Setting ─────────────────────────────────────────
@@ -1626,6 +1604,36 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
 @callback(Output("city-store","data"), Input("city-input","value"))
 def cb_store_city(city):
     return city or "Barcelona"
+
+
+@callback(
+    Output("gcal-status-section", "children"),
+    Input("gcal-status-interval", "n_intervals"),
+)
+def cb_gcal_status(n):
+    if os.path.exists(TOKEN_FILE):
+        return html.Div([
+            dbc.Alert([html.Span("✅  "), "Google Calendar is connected!"],
+                      color="success", className="py-2 mb-2"),
+            html.A(
+                html.Small("Reconnect with a different account →",
+                           style={"color":"#94a3b8","fontSize":"11px"}),
+                href="/connect-google", target="_blank",
+            ),
+        ])
+    return html.Div([
+        dbc.Label("Google account email to connect",
+                  style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
+        dbc.Input(
+            id="gcal-email-input", type="email",
+            placeholder="yourname@gmail.com",
+            className="wf-input mb-3",
+        ),
+        html.A(
+            dbc.Button("🔌 Connect Google Calendar", color="primary", size="sm"),
+            href="/connect-google", target="_blank",
+        ),
+    ])
 
 
 @callback(Output("email-time-display","children"), Input("email-time-dropdown","value"))
@@ -2035,11 +2043,8 @@ def cb_news(topics):
 def cb_send_email(n, recipient, user_name, gmail_user, gmail_pass, city, topics):
     if not recipient:
         return dbc.Alert("กรุณาใส่อีเมลปลายทางก่อน", color="warning")
-    if not RESEND_API_KEY:
-        return dbc.Alert(
-            "❌ ยังไม่ได้ตั้งค่า RESEND_API_KEY ใน Railway Variables",
-            color="danger"
-        )
+    if not SENDGRID_API_KEY:
+        return dbc.Alert("❌ ยังไม่ได้ตั้งค่า SENDGRID_API_KEY ใน Railway Variables", color="danger")
     ok, msg = send_email(recipient, city or "Barcelona", topics or ["Tech","Finance"],
                          user_name=user_name or "")
     return dbc.Alert(msg, color="success" if ok else "danger", dismissable=True)
