@@ -58,6 +58,7 @@ GOOGLE_SCOPES = [
 GMAIL_SENDER       = os.getenv("GMAIL_SENDER", "")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 SENDGRID_API_KEY   = os.getenv("SENDGRID_API_KEY", "")
+BREVO_API_KEY      = os.getenv("BREVO_API_KEY", "")
 
 try:
     from google.oauth2.credentials import Credentials
@@ -1030,10 +1031,10 @@ def _build_email_html(city: str, topics: list, user_name: str = "") -> str:
 def send_email(recipient: str, city: str, topics: list,
                gmail_user: str = "", gmail_password: str = "",
                user_name: str = "") -> tuple[bool, str]:
-    """ส่งอีเมลผ่าน SendGrid API (ทำงานได้บน Railway)"""
-    api_key = SENDGRID_API_KEY
+    """ส่งอีเมลผ่าน Brevo API"""
+    api_key = BREVO_API_KEY
     if not api_key:
-        return False, "❌ ยังไม่ได้ตั้งค่า SENDGRID_API_KEY ใน Railway Variables"
+        return False, "❌ ยังไม่ได้ตั้งค่า BREVO_API_KEY ใน Railway Variables"
     try:
         html_content = _build_email_html(city, topics, user_name=user_name)
         html_content = (html_content
@@ -1043,23 +1044,23 @@ def send_email(recipient: str, city: str, topics: list,
         )
         subject = f"WakeFlow · {datetime.now().strftime('%A, %B %d')}"
         resp = requests.post(
-            "https://api.sendgrid.com/v3/mail/send",
+            "https://api.brevo.com/v3/smtp/email",
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "api-key": api_key,
                 "Content-Type": "application/json",
             },
             json={
-                "personalizations": [{"to": [{"email": recipient}]}],
-                "from": {"email": "wakeflow1303@gmail.com", "name": "WakeFlow"},
+                "sender": {"name": "WakeFlow", "email": "wakeflow1303@gmail.com"},
+                "to": [{"email": recipient}],
                 "subject": subject,
-                "content": [{"type": "text/html", "value": html_content}],
+                "htmlContent": html_content,
             },
             timeout=15,
         )
-        if resp.status_code == 202:
+        if resp.status_code in (200, 201):
             return True, f"✅ Briefing sent to {recipient}!"
         else:
-            return False, f"❌ SendGrid error {resp.status_code}: {resp.text[:200]}"
+            return False, f"❌ Brevo error {resp.status_code}: {resp.text[:200]}"
     except Exception as e:
         return False, f"❌ {str(e)[:200]}"
 
@@ -2043,8 +2044,8 @@ def cb_news(topics):
 def cb_send_email(n, recipient, user_name, gmail_user, gmail_pass, city, topics):
     if not recipient:
         return dbc.Alert("กรุณาใส่อีเมลปลายทางก่อน", color="warning")
-    if not SENDGRID_API_KEY:
-        return dbc.Alert("❌ ยังไม่ได้ตั้งค่า SENDGRID_API_KEY ใน Railway Variables", color="danger")
+    if not BREVO_API_KEY:
+        return dbc.Alert("❌ ยังไม่ได้ตั้งค่า BREVO_API_KEY ใน Railway Variables", color="danger")
     ok, msg = send_email(recipient, city or "Barcelona", topics or ["Tech","Finance"],
                          user_name=user_name or "")
     return dbc.Alert(msg, color="success" if ok else "danger", dismissable=True)
