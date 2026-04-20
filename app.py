@@ -1361,27 +1361,21 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                     }, children=[
                         html.H6("📎 Upload File",
                                 style={"fontWeight":"700","color":"#1e293b","marginBottom":"8px"}),
-                        html.P("อัพโหลด PDF หรือรูป แล้วแท็กว่าเป็นหัวข้ออะไร",
+                        html.P("Upload a PDF or image, then tag it with a calendar/subject.",
                                style={"fontSize":"13px","color":"#64748b","marginBottom":"12px"}),
 
                         # Topic selector + manager
                         html.Div(className="d-flex align-items-center gap-2 mb-3 flex-wrap", children=[
                             dcc.Dropdown(
                                 id="planner-topic-dropdown",
-                                options=[
-                                    {"label":"📚 PDAI",      "value":"PDAI"},
-                                    {"label":"💼 TWD",       "value":"TWD"},
-                                    {"label":"📊 Finance",   "value":"Finance"},
-                                    {"label":"🔬 Research",  "value":"Research"},
-                                    {"label":"📝 Personal",  "value":"Personal"},
-                                ],
-                                placeholder="เลือกหัวข้อ / วิชา...",
+                                options=[{"label":"🗓️ Loading calendars...","value":""}],
+                                placeholder="Select subject / calendar...",
                                 clearable=True,
-                                style={"width":"200px","fontSize":"13px"},
+                                style={"width":"220px","fontSize":"13px"},
                             ),
                             dbc.Input(
                                 id="planner-new-topic",
-                                placeholder="+ เพิ่มหัวข้อใหม่...",
+                                placeholder="+ Add custom topic...",
                                 size="sm", style={"width":"160px","fontSize":"13px"},
                             ),
                             dbc.Button("➕", id="planner-add-topic-btn",
@@ -1435,7 +1429,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                             ),
                             dbc.Input(
                                 id="task-input",
-                                placeholder="เพิ่ม task ใหม่...",
+                                placeholder="Add a new task...",
                                 type="text",
                                 size="sm",
                                 n_submit=0,
@@ -2164,8 +2158,9 @@ def cb_add_task(n_btn, n_sub, text, category, tasks):
     if not text or not text.strip():
         return no_update, no_update
     tasks = tasks or []
+    new_id = max((t["id"] for t in tasks), default=-1) + 1
     tasks.append({
-        "id":       len(tasks),
+        "id":       new_id,
         "text":     text.strip(),
         "category": category or "todo",
         "done":     False,
@@ -2180,15 +2175,19 @@ def cb_add_task(n_btn, n_sub, text, category, tasks):
     prevent_initial_call=True,
 )
 def cb_toggle_task(checked_values, tasks):
-    if not tasks:
+    if not tasks or not ctx.triggered_id:
         return no_update
-    triggered = ctx.triggered_id
-    if not triggered:
+    triggered_idx = ctx.triggered_id["index"]
+    # หา position ใน inputs_list ที่ตรงกับ index ที่ trigger
+    all_inputs = ctx.inputs_list[0]
+    pos = next((i for i, inp in enumerate(all_inputs)
+                if inp["id"]["index"] == triggered_idx), None)
+    if pos is None:
         return no_update
-    idx = triggered["index"]
+    is_done = bool(checked_values[pos])
     for t in tasks:
-        if t["id"] == idx:
-            t["done"] = bool(checked_values[ctx.triggered.index(ctx.triggered[0])])
+        if t["id"] == triggered_idx:
+            t["done"] = is_done
             break
     return tasks
 
@@ -2200,14 +2199,10 @@ def cb_toggle_task(checked_values, tasks):
     prevent_initial_call=True,
 )
 def cb_delete_task(n_clicks_list, tasks):
-    if not any(n_clicks_list):
+    if not any(n_clicks_list) or not ctx.triggered_id:
         return no_update
-    triggered = ctx.triggered_id
-    if not triggered:
-        return no_update
-    idx = triggered["index"]
-    tasks = [t for t in (tasks or []) if t["id"] != idx]
-    return tasks
+    idx = ctx.triggered_id["index"]
+    return [t for t in (tasks or []) if t["id"] != idx]
 
 
 @callback(
@@ -2216,10 +2211,9 @@ def cb_delete_task(n_clicks_list, tasks):
 )
 def cb_render_tasks(tasks):
     if not tasks:
-        return html.P("ยังไม่มี task — เพิ่มด้านบนได้เลย 🎯",
+        return html.P("No tasks yet — add one above! 🎯",
                       style={"color":"#94a3b8","fontSize":"13px","textAlign":"center","marginTop":"20px"})
 
-    # Group by category
     cats = {}
     for t in tasks:
         cats.setdefault(t["category"], []).append(t)
@@ -2235,7 +2229,7 @@ def cb_render_tasks(tasks):
         ])
         rows = []
         for t in items:
-            done  = t["done"]
+            done = t["done"]
             rows.append(html.Div(className="d-flex align-items-center gap-2 py-1", style={
                 "borderBottom":"1px solid #f1f5f9",
             }, children=[
@@ -2246,7 +2240,7 @@ def cb_render_tasks(tasks):
                     inline=True, style={"margin":"0"},
                 ),
                 html.Span(t["text"], style={
-                    "fontSize":"13px","color":"#64748b" if done else "#1e293b",
+                    "fontSize":"13px","color":"#94a3b8" if done else "#1e293b",
                     "textDecoration":"line-through" if done else "none",
                     "flex":"1",
                 }),
@@ -2259,32 +2253,42 @@ def cb_render_tasks(tasks):
     return html.Div(sections)
 
 
-# ── Topic Tag Callbacks ────────────────────────────────────────────────────────
-_DEFAULT_TOPICS = [
-    {"label":"📚 PDAI","value":"PDAI"},
-    {"label":"💼 TWD","value":"TWD"},
-    {"label":"📊 Finance","value":"Finance"},
-    {"label":"🔬 Research","value":"Research"},
-    {"label":"📝 Personal","value":"Personal"},
-]
-
+# ── Topic = Google Calendar list ────────────────────────────────────────────────
 @callback(
     Output("planner-topic-dropdown", "options"),
-    Output("planner-new-topic",      "value"),
-    Input("planner-add-topic-btn",   "n_clicks"),
-    State("planner-new-topic",       "value"),
-    State("planner-topic-dropdown",  "options"),
+    Input("gcal-status-interval",    "n_intervals"),
+)
+def cb_load_calendar_topics(n):
+    """Load calendar names from Google Calendar as topic options."""
+    default_opts = [{"label": "📝 Personal", "value": "Personal"}]
+    if not (GOOGLE_AVAILABLE and os.path.exists(TOKEN_FILE)):
+        return default_opts
+    try:
+        creds    = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        service  = gapi_build("calendar", "v3", credentials=creds)
+        cal_list = service.calendarList().list().execute()
+        opts = []
+        for cal in cal_list.get("items", []):
+            name = cal.get("summary", "")
+            if not name or name.lower() in ("holidays in thailand","holidays in spain","週末"):
+                continue
+            opts.append({"label": f"🗓️ {name}", "value": name})
+        return opts if opts else default_opts
+    except Exception:
+        return default_opts
+
+
+@callback(
+    Output("planner-new-topic",     "value"),
+    Input("planner-add-topic-btn",  "n_clicks"),
+    State("planner-new-topic",      "value"),
+    State("planner-topic-dropdown", "options"),
     prevent_initial_call=True,
 )
 def cb_add_topic(n, new_topic, options):
     if not new_topic or not new_topic.strip():
-        return no_update, no_update
-    label = new_topic.strip()
-    value = label
-    if any(o["value"] == value for o in (options or [])):
-        return no_update, ""
-    new_opts = list(options or []) + [{"label": f"🏷️ {label}", "value": value}]
-    return new_opts, ""
+        return no_update
+    return ""
 
 
 # ── My Planner Callbacks ─────────────────────────────────────────────────────
