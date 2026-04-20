@@ -984,11 +984,12 @@ def build_month_chart(events_by_date: dict, year: int, month: int) -> go.Figure:
 # EMAIL BRIEFING
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_email_html(city: str, topics: list) -> str:
+def _build_email_html(city: str, topics: list, user_name: str = "") -> str:
     w      = get_weather(city)
     events = get_calendar_events(datetime.now().strftime("%Y-%m-%d"))
     news   = get_news(topics, 5)
     today  = datetime.now().strftime("%A, %B %d, %Y")
+    greeting = f"Hello {user_name}," if user_name.strip() else "Hello,"
 
     rows = "".join(
         f"<tr><td style='padding:4px 10px;color:#64748b'>{e['time']}</td>"
@@ -1008,6 +1009,7 @@ def _build_email_html(city: str, topics: list) -> str:
   font-family:'DM Sans',Arial,sans-serif;padding:36px;max-width:620px;margin:0 auto">
   <h1 style="color:#FC9F66;margin-bottom:2px">WakeFlow</h1>
   <p style="color:#64748b;margin-top:0;font-size:13px">{today} · Your Morning Briefing</p>
+  <p style="font-size:15px;color:#1e293b;margin:12px 0 20px">{greeting} Here's your briefing for today.</p>
   <div style="background:#fff8e8;border-radius:12px;padding:20px;margin:16px 0;border:1px solid #FAC357">
     <h2 style="color:#e07b30;margin-top:0;font-size:15px">{w.get('icon','?')} Weather — {w.get('city',city)}</h2>
     <span style="font-size:2.6rem;font-weight:700;color:#FC9F66">{w.get('temp','--')}°C</span>
@@ -1025,13 +1027,14 @@ def _build_email_html(city: str, topics: list) -> str:
 
 
 def send_email(recipient: str, city: str, topics: list,
-               gmail_user: str = "", gmail_password: str = "") -> tuple[bool, str]:
+               gmail_user: str = "", gmail_password: str = "",
+               user_name: str = "") -> tuple[bool, str]:
     gmail_user     = gmail_user     or GMAIL_SENDER
     gmail_password = gmail_password or GMAIL_APP_PASSWORD
     if not gmail_user or not gmail_password:
         return False, "Missing Gmail sender credentials."
     try:
-        html_content = _build_email_html(city, topics)
+        html_content = _build_email_html(city, topics, user_name=user_name)
         html_content = (html_content
             .replace("\xa0"," ").replace("\u200b","")
             .replace("\u2019","'").replace("\u2018","'")
@@ -1224,14 +1227,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
             ]),
         ]),
         dbc.Col(width=5, className="d-flex justify-content-end align-items-center gap-2", children=[
-            html.A(
-                dbc.Badge(
-                    "✅ Calendar Connected" if google_connected else "🔌 Connect Google Calendar",
-                    color="success" if google_connected else "secondary",
-                    className="wf-badge",
-                ),
-                href="/connect-google", target="_blank",
-            ),
         ]),
     ]),
 
@@ -1492,38 +1487,35 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         html.P("Connect your Google account to sync your calendar events with WakeFlow.",
                                style={"fontSize":"13px","color":"#64748b","marginBottom":"16px"}),
 
-                        # Connection status
-                        html.Div(id="gcal-status-badge", className="mb-3", children=[
-                            dbc.Alert(
-                                [html.Span("✅ "), "Google Calendar is connected!"],
-                                color="success", className="py-2 mb-0",
-                            ) if os.path.exists(TOKEN_FILE) else dbc.Alert(
-                                [html.Span("🔌 "), "Not connected yet."],
-                                color="secondary", className="py-2 mb-0",
+                        # ── Status (แสดงตามสถานะจริง ไม่มี "Not connected") ──
+                        dbc.Alert(
+                            [html.Span("✅  "), "Google Calendar is connected!"],
+                            color="success", className="py-2 mb-3",
+                        ) if os.path.exists(TOKEN_FILE) else html.Div([
+                            dbc.Label("Google account email to connect",
+                                      style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
+                            dbc.Input(
+                                id="gcal-email-input", type="email",
+                                placeholder="yourname@gmail.com",
+                                className="wf-input mb-2",
+                            ),
+                            html.P("The actual login is handled securely via Google OAuth.",
+                                   style={"fontSize":"11px","color":"#94a3b8","marginBottom":"14px"}),
+                            html.A(
+                                dbc.Button("🔌 Connect Google Calendar",
+                                           color="primary", size="sm"),
+                                href="/connect-google", target="_blank",
                             ),
                         ]),
 
-                        dbc.Label("Google account email to connect",
-                                  style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
-                        dbc.Input(
-                            id="gcal-email-input", type="email",
-                            placeholder="yourname@gmail.com",
-                            className="wf-input mb-3",
-                        ),
-                        html.P("This is just for reference — the actual connection uses OAuth "
-                               "so you'll log in securely via Google.",
-                               style={"fontSize":"11px","color":"#94a3b8","marginBottom":"16px"}),
-
-                        html.A(
-                            dbc.Button(
-                                "✅ Already Connected" if os.path.exists(TOKEN_FILE)
-                                else "🔌 Connect Google Calendar",
-                                color="success" if os.path.exists(TOKEN_FILE) else "primary",
-                                size="sm",
-                                disabled=os.path.exists(TOKEN_FILE),
+                        # ── ถ้า connected แล้ว แสดงปุ่ม reconnect เล็กๆ ──
+                        html.Div([
+                            html.A(
+                                html.Small("Reconnect with a different account →",
+                                           style={"color":"#94a3b8","fontSize":"11px"}),
+                                href="/connect-google", target="_blank",
                             ),
-                            href="/connect-google", target="_blank",
-                        ),
+                        ]) if os.path.exists(TOKEN_FILE) else html.Div(),
                     ]),
                 ]),
 
@@ -1543,6 +1535,14 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         dbc.Input(id="gmail-user-input", type="hidden", value=""),
                         dbc.Input(id="gmail-pass-input", type="hidden", value=""),
 
+                        # ── ชื่อ user (ข้อ 6 — สิ่งแรก) ──────────────────
+                        dbc.Label("👤 Your name (for email greeting)",
+                                  style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
+                        dbc.Input(id="user-name-input", type="text",
+                                  placeholder="e.g. Eng",
+                                  className="wf-input mb-3"),
+
+                        # ── อีเมลปลายทาง (แยกจาก gcal) ──────────────────
                         dbc.Label("💌 Send briefing to",
                                   style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
                         dbc.Input(id="email-input", type="email",
@@ -1573,20 +1573,8 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
 
                         html.Div(id="email-status",    className="mt-2"),
                         html.Div(id="schedule-status", className="mt-1"),
-
-                        html.Hr(style={"borderColor":"#e2e8f0","margin":"16px 0"}),
-                        html.Div([
-                            html.Div("📋 What's included:", style={"fontWeight":"600","fontSize":"12px","color":"#475569","marginBottom":"8px"}),
-                            *[html.Div(className="d-flex gap-2 align-items-center mb-1", children=[
-                                html.Span(icon, style={"fontSize":"14px"}),
-                                html.Span(label, style={"fontSize":"12px","color":"#64748b"}),
-                            ]) for icon, label in [
-                                ("📅","Today's calendar events"),
-                                ("🌤️","Live weather"),
-                                ("📰","Top 5 news headlines"),
-                            ]],
-                        ]),
-                        html.Div(id="schedule-info", style={"fontSize":"12px","marginTop":"8px"}),
+                        html.Div(id="schedule-info",   className="mt-1",
+                                 style={"fontSize":"12px"}),
                     ]),
                 ]),
 
@@ -2005,13 +1993,14 @@ def cb_news(topics):
     Output("email-status",  "children"),
     Input("send-email-btn", "n_clicks"),
     State("email-input",       "value"),
+    State("user-name-input",   "value"),
     State("gmail-user-input",  "value"),
     State("gmail-pass-input",  "value"),
     State("city-store",        "data"),
     State("topics-check",      "value"),
     prevent_initial_call=True,
 )
-def cb_send_email(n, recipient, gmail_user, gmail_pass, city, topics):
+def cb_send_email(n, recipient, user_name, gmail_user, gmail_pass, city, topics):
     if not recipient:
         return dbc.Alert("Please enter a recipient email address.", color="warning")
     sender   = gmail_user or GMAIL_SENDER
@@ -2019,7 +2008,8 @@ def cb_send_email(n, recipient, gmail_user, gmail_pass, city, topics):
     if not sender or not password:
         return dbc.Alert("Email sender not configured. Add GMAIL_SENDER and GMAIL_APP_PASSWORD to .env", color="danger")
     ok, msg = send_email(recipient, city or "Barcelona", topics or ["Tech","Finance"],
-                         gmail_user=sender, gmail_password=password)
+                         gmail_user=sender, gmail_password=password,
+                         user_name=user_name or "")
     return dbc.Alert(msg, color="success" if ok else "danger", dismissable=True)
 
 
@@ -2028,6 +2018,7 @@ def cb_send_email(n, recipient, gmail_user, gmail_pass, city, topics):
     Output("schedule-info",   "children"),
     Input("save-schedule-btn",   "n_clicks"),
     State("email-input",         "value"),
+    State("user-name-input",     "value"),
     State("gmail-user-input",    "value"),
     State("gmail-pass-input",    "value"),
     State("email-time-dropdown", "value"),
@@ -2035,7 +2026,7 @@ def cb_send_email(n, recipient, gmail_user, gmail_pass, city, topics):
     State("topics-check",        "value"),
     prevent_initial_call=True,
 )
-def cb_save_schedule(n, recipient, gmail_user, gmail_pass, hour, city, topics):
+def cb_save_schedule(n, recipient, user_name, gmail_user, gmail_pass, hour, city, topics):
     sender   = gmail_user or GMAIL_SENDER
     password = gmail_pass or GMAIL_APP_PASSWORD
     if not recipient:
@@ -2049,21 +2040,24 @@ def cb_save_schedule(n, recipient, gmail_user, gmail_pass, hour, city, topics):
         except Exception:
             pass
 
-    city   = city   or "Barcelona"
-    topics = topics or ["Tech","Finance"]
+    city      = city      or "Barcelona"
+    topics    = topics    or ["Tech","Finance"]
+    user_name = user_name or ""
 
     def _send():
-        send_email(recipient, city, topics, gmail_user=sender, gmail_password=password)
+        send_email(recipient, city, topics, gmail_user=sender,
+                   gmail_password=password, user_name=user_name)
 
     job = scheduler.add_job(_send, trigger="cron", hour=hour, minute=0,
                             id="daily_briefing", replace_existing=True)
     _scheduled_job["job"] = job
 
+    name_part = f" · Hi {user_name}!" if user_name else ""
     info = html.Div([
-        html.Span("⏰ Scheduled: ", style={"color":"#34d399","fontWeight":"600"}),
-        html.Span(f"Daily at {hour:02d}:00", style={"color":"#e2e8f0"}), html.Br(),
+        html.Span("⏰ Scheduled: ", style={"color":"#0b8043","fontWeight":"600"}),
+        html.Span(f"Daily at {hour:02d}:00{name_part}", style={"color":"#374151"}), html.Br(),
         html.Span("📬 To: ", style={"color":"#475569"}),
-        html.Span(recipient, style={"color":"#e2e8f0"}),
+        html.Span(recipient, style={"color":"#374151"}),
     ])
     return (dbc.Alert(f"✅ Schedule saved! Briefing will send daily at {hour:02d}:00.",
                       color="success", dismissable=True), info)
