@@ -1227,14 +1227,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
             ]),
         ]),
         dbc.Col(width=5, className="d-flex justify-content-end align-items-center gap-2", children=[
-            html.A(
-                dbc.Badge(
-                    "✅ Calendar Connected" if google_connected else "🔌 Connect Google Calendar",
-                    color="success" if google_connected else "secondary",
-                    className="wf-badge",
-                ),
-                href="/connect-google", target="_blank",
-            ),
         ]),
     ]),
 
@@ -1512,6 +1504,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                     html.Div(style={
                         "background":"white","borderRadius":"12px",
                         "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                        "marginBottom":"16px",
                     }, children=[
                         html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
                             html.Span("📍", style={"fontSize":"1.4rem"}),
@@ -1527,16 +1520,11 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         html.P("Used in Weather tab, AI Assistant, and daily email.",
                                style={"fontSize":"11px","color":"#94a3b8","marginTop":"8px","marginBottom":"0"}),
                     ]),
-                ]),
 
-                # ── Daily Email + News Preferences ────────────────────────────
-                dbc.Col(width=6, children=[
-
-                    # News Preferences
+                    # ── News Preferences ──────────────────────────────────────
                     html.Div(style={
                         "background":"white","borderRadius":"12px",
                         "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
-                        "marginBottom":"16px",
                     }, children=[
                         html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
                             html.Span("📰", style={"fontSize":"1.4rem"}),
@@ -1554,6 +1542,10 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                             className="wf-checklist",
                         ),
                     ]),
+                ]),
+
+                # ── Daily Email ───────────────────────────────────────────────
+                dbc.Col(width=6, children=[
 
                     # Daily Email
                     html.Div(style={
@@ -2035,11 +2027,19 @@ def cb_news(topics):
 )
 def cb_send_email(n, recipient, user_name, gmail_user, gmail_pass, city, topics):
     if not recipient:
-        return dbc.Alert("Please enter a recipient email address.", color="warning")
+        return dbc.Alert("กรุณาใส่อีเมลปลายทางก่อน", color="warning")
     sender   = gmail_user or GMAIL_SENDER
     password = gmail_pass or GMAIL_APP_PASSWORD
-    if not sender or not password:
-        return dbc.Alert("Email sender not configured. Add GMAIL_SENDER and GMAIL_APP_PASSWORD to .env", color="danger")
+    if not sender:
+        return dbc.Alert(
+            "❌ ยังไม่ได้ตั้งค่า GMAIL_SENDER — เพิ่มใน Railway Variables: GMAIL_SENDER = your@gmail.com",
+            color="danger"
+        )
+    if not password:
+        return dbc.Alert(
+            "❌ ยังไม่ได้ตั้งค่า GMAIL_APP_PASSWORD — เพิ่มใน Railway Variables: GMAIL_APP_PASSWORD = your-app-password",
+            color="danger"
+        )
     ok, msg = send_email(recipient, city or "Barcelona", topics or ["Tech","Finance"],
                          gmail_user=sender, gmail_password=password,
                          user_name=user_name or "")
