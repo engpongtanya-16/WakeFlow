@@ -1474,56 +1474,122 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
             ]),
         ]),
 
-        # ── Tab 5: Daily Email ───────────────────────────────────────────────
-        dbc.Tab(tab_id="tab-email", label="📧 Daily Email", children=[
+        # ── Tab 5: Settings ──────────────────────────────────────────────────
+        dbc.Tab(tab_id="tab-settings", label="⚙️ Settings", children=[
             dbc.Row(className="mt-3 g-3", children=[
+
+                # ── Google Calendar ──────────────────────────────────────────
                 dbc.Col(width=6, children=[
-                    html.H5("Morning Briefing Email", className="wf-card-title mb-1"),
-                    html.P("Get a daily morning briefing with your calendar, weather, and top news "
-                           "delivered straight to your inbox.",
-                           style={"color":"#374151","fontSize":"13px","marginBottom":"20px"}),
-                    dbc.Input(id="gmail-user-input", type="hidden", value=""),
-                    dbc.Input(id="gmail-pass-input", type="hidden", value=""),
-                    dbc.Label("💌 Email address for morning brief", className="wf-label"),
-                    dbc.Input(id="email-input", type="email", placeholder="your@email.com",
-                              className="wf-input mb-3"),
-                    dbc.Label("⏰ Send daily briefing at", className="wf-label"),
-                    dcc.Dropdown(
-                        id="email-time-dropdown",
-                        options=[{"label": f"{h:02d}:00", "value": h} for h in range(5, 12)],
-                        value=7, clearable=False, className="wf-dropdown mb-3",
-                        style={"maxWidth":"160px"},
-                    ),
-                    html.P(id="email-time-display",
-                           style={"color":"#374151","fontSize":"12px","marginTop":"-8px","marginBottom":"12px"}),
-                    dbc.Row(className="g-2", children=[
-                        dbc.Col(width=6, children=[
-                            dbc.Button("📨 Send Now", id="send-email-btn",
-                                       color="warning", n_clicks=0, size="sm", className="w-100"),
+                    html.Div(style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                        "marginBottom":"16px",
+                    }, children=[
+                        html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
+                            html.Span("🗓️", style={"fontSize":"1.4rem"}),
+                            html.H6("Google Calendar", style={"fontWeight":"700","color":"#1e293b","margin":"0"}),
                         ]),
-                        dbc.Col(width=6, children=[
-                            dbc.Button("⏰ Save Schedule", id="save-schedule-btn",
-                                       color="success", n_clicks=0, size="sm", className="w-100"),
+                        html.P("Connect your Google account to sync your calendar events with WakeFlow.",
+                               style={"fontSize":"13px","color":"#64748b","marginBottom":"16px"}),
+
+                        # Connection status
+                        html.Div(id="gcal-status-badge", className="mb-3", children=[
+                            dbc.Alert(
+                                [html.Span("✅ "), "Google Calendar is connected!"],
+                                color="success", className="py-2 mb-0",
+                            ) if os.path.exists(TOKEN_FILE) else dbc.Alert(
+                                [html.Span("🔌 "), "Not connected yet."],
+                                color="secondary", className="py-2 mb-0",
+                            ),
                         ]),
+
+                        dbc.Label("Google account email to connect",
+                                  style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
+                        dbc.Input(
+                            id="gcal-email-input", type="email",
+                            placeholder="yourname@gmail.com",
+                            className="wf-input mb-3",
+                        ),
+                        html.P("This is just for reference — the actual connection uses OAuth "
+                               "so you'll log in securely via Google.",
+                               style={"fontSize":"11px","color":"#94a3b8","marginBottom":"16px"}),
+
+                        html.A(
+                            dbc.Button(
+                                "✅ Already Connected" if os.path.exists(TOKEN_FILE)
+                                else "🔌 Connect Google Calendar",
+                                color="success" if os.path.exists(TOKEN_FILE) else "primary",
+                                size="sm",
+                                disabled=os.path.exists(TOKEN_FILE),
+                            ),
+                            href="/connect-google", target="_blank",
+                        ),
                     ]),
-                    html.Div(id="email-status",   className="mt-3"),
-                    html.Div(id="schedule-status", className="mt-2"),
                 ]),
+
+                # ── Daily Email ───────────────────────────────────────────────
                 dbc.Col(width=6, children=[
-                    html.Div(className="wf-card", children=[
-                        html.H6("📋 What's in the daily email?", className="wf-card-title"),
-                        *[html.Div(className="wf-tool-row", children=[
-                            html.Span(icon+" ", style={"marginRight":"8px"}),
-                            html.Span(label, style={"color":"#374151","fontSize":"13px"}),
-                        ]) for icon, label in [
-                            ("📅","Today's schedule from Google Calendar"),
-                            ("🌤️","Live weather for your city"),
-                            ("📰","Top 5 news headlines"),
-                        ]],
-                        html.Hr(className="wf-divider"),
-                        html.Div(id="schedule-info", style={"color":"#374151","fontSize":"12px"}),
+                    html.Div(style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                    }, children=[
+                        html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
+                            html.Span("📧", style={"fontSize":"1.4rem"}),
+                            html.H6("Daily Morning Briefing Email", style={"fontWeight":"700","color":"#1e293b","margin":"0"}),
+                        ]),
+                        html.P("Get your calendar, weather, and news delivered to your inbox every morning.",
+                               style={"fontSize":"13px","color":"#64748b","marginBottom":"16px"}),
+
+                        dbc.Input(id="gmail-user-input", type="hidden", value=""),
+                        dbc.Input(id="gmail-pass-input", type="hidden", value=""),
+
+                        dbc.Label("💌 Send briefing to",
+                                  style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
+                        dbc.Input(id="email-input", type="email",
+                                  placeholder="your@email.com",
+                                  className="wf-input mb-3"),
+
+                        dbc.Label("⏰ Send daily at",
+                                  style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
+                        dcc.Dropdown(
+                            id="email-time-dropdown",
+                            options=[{"label": f"{h:02d}:00", "value": h} for h in range(5, 12)],
+                            value=7, clearable=False, className="wf-dropdown mb-1",
+                            style={"maxWidth":"160px"},
+                        ),
+                        html.P(id="email-time-display",
+                               style={"color":"#94a3b8","fontSize":"11px","marginBottom":"16px"}),
+
+                        dbc.Row(className="g-2 mb-2", children=[
+                            dbc.Col(width=6, children=[
+                                dbc.Button("📨 Send Now", id="send-email-btn",
+                                           color="warning", n_clicks=0, size="sm", className="w-100"),
+                            ]),
+                            dbc.Col(width=6, children=[
+                                dbc.Button("⏰ Save Schedule", id="save-schedule-btn",
+                                           color="success", n_clicks=0, size="sm", className="w-100"),
+                            ]),
+                        ]),
+
+                        html.Div(id="email-status",    className="mt-2"),
+                        html.Div(id="schedule-status", className="mt-1"),
+
+                        html.Hr(style={"borderColor":"#e2e8f0","margin":"16px 0"}),
+                        html.Div([
+                            html.Div("📋 What's included:", style={"fontWeight":"600","fontSize":"12px","color":"#475569","marginBottom":"8px"}),
+                            *[html.Div(className="d-flex gap-2 align-items-center mb-1", children=[
+                                html.Span(icon, style={"fontSize":"14px"}),
+                                html.Span(label, style={"fontSize":"12px","color":"#64748b"}),
+                            ]) for icon, label in [
+                                ("📅","Today's calendar events"),
+                                ("🌤️","Live weather"),
+                                ("📰","Top 5 news headlines"),
+                            ]],
+                        ]),
+                        html.Div(id="schedule-info", style={"fontSize":"12px","marginTop":"8px"}),
                     ]),
                 ]),
+
             ]),
         ]),
 
