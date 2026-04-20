@@ -989,42 +989,66 @@ def build_month_chart(events_by_date: dict, year: int, month: int) -> go.Figure:
 def _build_email_html(city: str, topics: list, user_name: str = "") -> str:
     w        = get_weather(city)
     events   = get_calendar_events(datetime.now().strftime("%Y-%m-%d"))
-    news     = get_news(topics, 5)
+    news     = get_news(topics, 8)
     today    = datetime.now().strftime("%A, %B %d, %Y")
     greeting = f"Hello {user_name}," if user_name.strip() else "Hello,"
 
-    rows = "".join(
-        f"<tr><td style='padding:4px 10px;color:#64748b'>{e['time']}</td>"
-        f"<td style='padding:4px 10px;color:#1e293b;font-weight:600'>{e['title']}</td>"
-        f"<td style='padding:4px 10px;color:#64748b'>{e.get('location','')}</td></tr>"
-        for e in events
-    )
+    # Schedule rows — แสดง time range + title + location
+    if events:
+        rows = "".join(
+            f"<tr style='border-bottom:1px solid #fde68a'>"
+            f"<td style='padding:8px 10px;color:#92400e;font-size:12px;white-space:nowrap'>"
+            f"{e['time']}–{e.get('end','')}</td>"
+            f"<td style='padding:8px 10px;color:#1e293b;font-weight:600'>{e['title']}</td>"
+            f"<td style='padding:8px 10px;color:#64748b;font-size:12px'>{e.get('location','')}</td>"
+            f"</tr>"
+            for e in events
+        )
+        schedule_section = f"""
+  <div style="background:#fff8e8;border-radius:12px;padding:20px;margin:16px 0;border:1px solid #FAC357">
+    <h2 style="color:#0b8043;margin-top:0;font-size:15px">📅 Today's Schedule — {len(events)} event{'s' if len(events)>1 else ''}</h2>
+    <table style="width:100%;border-collapse:collapse">{rows}</table>
+  </div>"""
+    else:
+        schedule_section = """
+  <div style="background:#fff8e8;border-radius:12px;padding:20px;margin:16px 0;border:1px solid #FAC357">
+    <h2 style="color:#0b8043;margin-top:0;font-size:15px">📅 Today's Schedule</h2>
+    <p style="color:#64748b;margin:0">No events scheduled for today — enjoy your free day! 🎉</p>
+  </div>"""
+
+    # News items — แสดงพร้อม description
     news_items = "".join(
-        f"<li style='margin-bottom:8px'>"
-        f"<a href='{a['url']}' style='color:#60a5fa;text-decoration:none'>{a['title']}</a>"
-        f" <span style='color:#64748b;font-size:11px'>— {a['source']}</span></li>"
+        f"<li style='margin-bottom:12px'>"
+        f"<a href='{a['url']}' style='color:#1d6fad;text-decoration:none;font-weight:600'>{a['title']}</a><br>"
+        f"<span style='color:#64748b;font-size:12px'>{(a.get('description') or '')[:100]}{'…' if len(a.get('description') or '')>100 else ''}</span><br>"
+        f"<span style='color:#94a3b8;font-size:11px'>— {a['source']} · {a.get('time','')}</span>"
+        f"</li>"
         for a in news
     ) or "<li style='color:#64748b'>No news available</li>"
 
     return f"""
 <html><body style="background:#FAF1D6;color:#1e293b;
-  font-family:'DM Sans',Arial,sans-serif;padding:36px;max-width:620px;margin:0 auto">
-  <h1 style="color:#FC9F66;margin-bottom:2px">WakeFlow</h1>
+  font-family:'DM Sans',Arial,sans-serif;padding:36px;max-width:640px;margin:0 auto">
+  <h1 style="color:#FC9F66;margin-bottom:2px">🌅 WakeFlow</h1>
   <p style="color:#64748b;margin-top:0;font-size:13px">{today} · Your Morning Briefing</p>
   <p style="font-size:15px;color:#1e293b;margin:12px 0 20px">{greeting} Here's your briefing for today.</p>
+
   <div style="background:#fff8e8;border-radius:12px;padding:20px;margin:16px 0;border:1px solid #FAC357">
-    <h2 style="color:#e07b30;margin-top:0;font-size:15px">{w.get('icon','?')} Weather — {w.get('city',city)}</h2>
+    <h2 style="color:#e07b30;margin-top:0;font-size:15px">{w.get('icon','🌤️')} Weather — {w.get('city',city)}</h2>
     <span style="font-size:2.6rem;font-weight:700;color:#FC9F66">{w.get('temp','--')}°C</span>
-    <span style="color:#64748b;margin-left:12px">{w.get('condition','--')} · Feels {w.get('feels_like','--')}°C · {w.get('humidity','--')}%</span>
+    <span style="color:#64748b;margin-left:12px">{w.get('condition','--')} · Feels {w.get('feels_like','--')}°C · Humidity {w.get('humidity','--')}%</span>
   </div>
+
+  {schedule_section}
+
   <div style="background:#fff8e8;border-radius:12px;padding:20px;margin:16px 0;border:1px solid #FAC357">
-    <h2 style="color:#0b8043;margin-top:0;font-size:15px">Today's Schedule</h2>
-    <table style="width:100%;border-collapse:collapse">{rows}</table>
-  </div>
-  <div style="background:#fff8e8;border-radius:12px;padding:20px;margin:16px 0;border:1px solid #FAC357">
-    <h2 style="color:#1d6fad;margin-top:0;font-size:15px">Top Stories</h2>
+    <h2 style="color:#1d6fad;margin-top:0;font-size:15px">📰 Top Stories</h2>
     <ul style="padding-left:16px;margin:0">{news_items}</ul>
   </div>
+
+  <p style="color:#b45309;font-size:11px;text-align:center;margin-top:24px">
+    Sent by WakeFlow · ESADE PDAI
+  </p>
 </body></html>"""
 
 
