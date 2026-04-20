@@ -1351,89 +1351,108 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         # ── Tab 2: My Planner ────────────────────────────────────────────────
         dbc.Tab(tab_id="tab-planner", label="📋 My Planner", children=[
             dbc.Row(className="mt-3 g-3", children=[
-                dbc.Col(width=7, children=[
-                    html.Div([
-                        html.H6("📎 Upload Schedule or Task List",
-                                style={"fontWeight":"600","color":"#1e293b","marginBottom":"8px"}),
-                        html.P("Upload a PDF or image (screenshot, photo of schedule, invitation) — "
-                               "WakeFlow will read it and extract your events automatically.",
+
+                # ── Left: Upload + Topic Tagger ──────────────────────────────
+                dbc.Col(width=6, children=[
+                    html.Div(style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                        "marginBottom":"16px",
+                    }, children=[
+                        html.H6("📎 Upload File",
+                                style={"fontWeight":"700","color":"#1e293b","marginBottom":"8px"}),
+                        html.P("อัพโหลด PDF หรือรูป แล้วแท็กว่าเป็นหัวข้ออะไร",
                                style={"fontSize":"13px","color":"#64748b","marginBottom":"12px"}),
+
+                        # Topic selector + manager
+                        html.Div(className="d-flex align-items-center gap-2 mb-3 flex-wrap", children=[
+                            dcc.Dropdown(
+                                id="planner-topic-select",
+                                options=[
+                                    {"label":"📚 PDAI",      "value":"PDAI"},
+                                    {"label":"💼 TWD",       "value":"TWD"},
+                                    {"label":"📊 Finance",   "value":"Finance"},
+                                    {"label":"🔬 Research",  "value":"Research"},
+                                    {"label":"📝 Personal",  "value":"Personal"},
+                                ],
+                                placeholder="เลือกหัวข้อ / วิชา...",
+                                clearable=True,
+                                style={"width":"200px","fontSize":"13px"},
+                                id="planner-topic-dropdown",
+                            ),
+                            dbc.Input(
+                                id="planner-new-topic",
+                                placeholder="+ เพิ่มหัวข้อใหม่...",
+                                size="sm", style={"width":"160px","fontSize":"13px"},
+                            ),
+                            dbc.Button("➕", id="planner-add-topic-btn",
+                                       color="light", size="sm", n_clicks=0),
+                        ]),
+                        html.Div(id="planner-topic-tags", className="mb-3"),
+
                         dcc.Upload(
                             id="planner-upload",
                             children=html.Div([
-                                html.Div("📂", style={"fontSize":"2.5rem","marginBottom":"8px"}),
+                                html.Div("📂", style={"fontSize":"2rem","marginBottom":"6px"}),
                                 html.Div("Drag & drop or click to upload",
-                                         style={"fontWeight":"600","fontSize":"14px","color":"#1e293b"}),
-                                html.Div("PDF, PNG, JPG supported",
-                                         style={"fontSize":"12px","color":"#94a3b8","marginTop":"4px"}),
-                            ], style={"textAlign":"center","padding":"32px 16px"}),
+                                         style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
+                                html.Div("PDF, PNG, JPG",
+                                         style={"fontSize":"11px","color":"#94a3b8","marginTop":"2px"}),
+                            ], style={"textAlign":"center","padding":"20px 16px"}),
                             accept=".pdf,.png,.jpg,.jpeg",
                             multiple=False,
                             style={
                                 "border":"2px dashed #cbd5e1","borderRadius":"12px",
-                                "background":"rgba(255,255,255,0.7)","cursor":"pointer",
-                                "transition":"border-color 0.2s",
+                                "background":"rgba(249,250,251,0.8)","cursor":"pointer",
                             },
-                            className="wf-upload-zone",
                         ),
-                        dcc.Loading(
-                            type="circle", color="#f97316",
-                            children=html.Div(id="planner-result", className="mt-3"),
-                        ),
-                    ], style={
-                        "background":"white","borderRadius":"12px",
-                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
-                    }),
+                        dcc.Loading(type="circle", color="#f97316",
+                                    children=html.Div(id="planner-result", className="mt-3")),
+                    ]),
                 ]),
-                dbc.Col(width=5, children=[
-                    html.Div([
-                        html.H6("💡 How it works",
-                                style={"fontWeight":"600","color":"#1e293b","marginBottom":"12px"}),
-                        html.Div([
-                            html.Div(className="d-flex gap-3 mb-3", children=[
-                                html.Div("1", style={
-                                    "background":"#f97316","color":"white","borderRadius":"50%",
-                                    "width":"28px","height":"28px","display":"flex",
-                                    "alignItems":"center","justifyContent":"center",
-                                    "fontWeight":"700","fontSize":"13px","flexShrink":"0",
-                                }),
-                                html.Div([
-                                    html.Div("Upload a file", style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
-                                    html.Div("PDF timetable, screenshot of schedule, or photo of a handwritten plan",
-                                             style={"fontSize":"12px","color":"#64748b"}),
-                                ]),
-                            ]),
-                            html.Div(className="d-flex gap-3 mb-3", children=[
-                                html.Div("2", style={
-                                    "background":"#f97316","color":"white","borderRadius":"50%",
-                                    "width":"28px","height":"28px","display":"flex",
-                                    "alignItems":"center","justifyContent":"center",
-                                    "fontWeight":"700","fontSize":"13px","flexShrink":"0",
-                                }),
-                                html.Div([
-                                    html.Div("AI reads it", style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
-                                    html.Div("GPT-4o extracts event titles, dates, times, and locations",
-                                             style={"fontSize":"12px","color":"#64748b"}),
-                                ]),
-                            ]),
-                            html.Div(className="d-flex gap-3", children=[
-                                html.Div("3", style={
-                                    "background":"#f97316","color":"white","borderRadius":"50%",
-                                    "width":"28px","height":"28px","display":"flex",
-                                    "alignItems":"center","justifyContent":"center",
-                                    "fontWeight":"700","fontSize":"13px","flexShrink":"0",
-                                }),
-                                html.Div([
-                                    html.Div("Add to Calendar", style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
-                                    html.Div("Review extracted events and add them to Google Calendar in one click",
-                                             style={"fontSize":"12px","color":"#64748b"}),
-                                ]),
-                            ]),
-                        ]),
-                    ], style={
+
+                # ── Right: Task / To-Do Manager ──────────────────────────────
+                dbc.Col(width=6, children=[
+                    html.Div(style={
                         "background":"white","borderRadius":"12px",
                         "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
-                    }),
+                    }, children=[
+                        html.H6("✅ My Tasks",
+                                style={"fontWeight":"700","color":"#1e293b","marginBottom":"12px"}),
+
+                        # Add task input
+                        html.Div(className="d-flex gap-2 mb-3", children=[
+                            dcc.Dropdown(
+                                id="task-category-select",
+                                options=[
+                                    {"label":"📋 To-Do",      "value":"todo"},
+                                    {"label":"📚 Assignment",  "value":"assignment"},
+                                    {"label":"💼 Work",        "value":"work"},
+                                    {"label":"🏠 Personal",    "value":"personal"},
+                                ],
+                                value="todo",
+                                clearable=False,
+                                style={"width":"140px","fontSize":"12px"},
+                            ),
+                            dbc.Input(
+                                id="task-input",
+                                placeholder="เพิ่ม task ใหม่...",
+                                type="text",
+                                size="sm",
+                                n_submit=0,
+                                className="wf-input",
+                                style={"fontSize":"13px"},
+                            ),
+                            dbc.Button("➕", id="task-add-btn",
+                                       color="warning", size="sm", n_clicks=0),
+                        ]),
+
+                        # Task list display
+                        html.Div(id="task-list-display"),
+
+                        # Store for tasks
+                        dcc.Store(id="task-store", data=[]),
+                    ]),
                 ]),
             ]),
         ]),
@@ -2124,15 +2143,161 @@ def cb_save_schedule(n, recipient, user_name, gmail_user, gmail_pass, hour, city
                       color="success", dismissable=True), info)
 
 
+# ── Task Manager Callbacks ────────────────────────────────────────────────────
+CAT_COLORS = {
+    "todo":       ("#f97316","📋"),
+    "assignment": ("#8b5cf6","📚"),
+    "work":       ("#0891b2","💼"),
+    "personal":   ("#059669","🏠"),
+}
+
+@callback(
+    Output("task-store",        "data"),
+    Output("task-input",        "value"),
+    Input("task-add-btn",       "n_clicks"),
+    Input("task-input",         "n_submit"),
+    State("task-input",         "value"),
+    State("task-category-select","value"),
+    State("task-store",         "data"),
+    prevent_initial_call=True,
+)
+def cb_add_task(n_btn, n_sub, text, category, tasks):
+    if not text or not text.strip():
+        return no_update, no_update
+    tasks = tasks or []
+    tasks.append({
+        "id":       len(tasks),
+        "text":     text.strip(),
+        "category": category or "todo",
+        "done":     False,
+    })
+    return tasks, ""
+
+
+@callback(
+    Output("task-store", "data", allow_duplicate=True),
+    Input({"type":"task-check","index": dash.ALL}, "value"),
+    State("task-store", "data"),
+    prevent_initial_call=True,
+)
+def cb_toggle_task(checked_values, tasks):
+    if not tasks:
+        return no_update
+    triggered = ctx.triggered_id
+    if not triggered:
+        return no_update
+    idx = triggered["index"]
+    for t in tasks:
+        if t["id"] == idx:
+            t["done"] = bool(checked_values[ctx.triggered.index(ctx.triggered[0])])
+            break
+    return tasks
+
+
+@callback(
+    Output("task-store", "data", allow_duplicate=True),
+    Input({"type":"task-delete","index": dash.ALL}, "n_clicks"),
+    State("task-store", "data"),
+    prevent_initial_call=True,
+)
+def cb_delete_task(n_clicks_list, tasks):
+    if not any(n_clicks_list):
+        return no_update
+    triggered = ctx.triggered_id
+    if not triggered:
+        return no_update
+    idx = triggered["index"]
+    tasks = [t for t in (tasks or []) if t["id"] != idx]
+    return tasks
+
+
+@callback(
+    Output("task-list-display", "children"),
+    Input("task-store", "data"),
+)
+def cb_render_tasks(tasks):
+    if not tasks:
+        return html.P("ยังไม่มี task — เพิ่มด้านบนได้เลย 🎯",
+                      style={"color":"#94a3b8","fontSize":"13px","textAlign":"center","marginTop":"20px"})
+
+    # Group by category
+    cats = {}
+    for t in tasks:
+        cats.setdefault(t["category"], []).append(t)
+
+    sections = []
+    for cat, items in cats.items():
+        color, icon = CAT_COLORS.get(cat, ("#64748b","📌"))
+        done_count  = sum(1 for t in items if t["done"])
+        header = html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
+            html.Span(icon, style={"fontSize":"14px"}),
+            html.Span(cat.capitalize(), style={"fontWeight":"600","fontSize":"13px","color":color}),
+            html.Span(f"{done_count}/{len(items)}", style={"fontSize":"11px","color":"#94a3b8","marginLeft":"4px"}),
+        ])
+        rows = []
+        for t in items:
+            done  = t["done"]
+            rows.append(html.Div(className="d-flex align-items-center gap-2 py-1", style={
+                "borderBottom":"1px solid #f1f5f9",
+            }, children=[
+                dbc.Checklist(
+                    options=[{"label":"","value":1}],
+                    value=[1] if done else [],
+                    id={"type":"task-check","index":t["id"]},
+                    inline=True, style={"margin":"0"},
+                ),
+                html.Span(t["text"], style={
+                    "fontSize":"13px","color":"#64748b" if done else "#1e293b",
+                    "textDecoration":"line-through" if done else "none",
+                    "flex":"1",
+                }),
+                html.Span("✕", id={"type":"task-delete","index":t["id"]},
+                          style={"cursor":"pointer","color":"#cbd5e1","fontSize":"12px","padding":"0 4px"},
+                          n_clicks=0),
+            ]))
+        sections.append(html.Div([header, *rows], className="mb-3"))
+
+    return html.Div(sections)
+
+
+# ── Topic Tag Callbacks ────────────────────────────────────────────────────────
+_DEFAULT_TOPICS = [
+    {"label":"📚 PDAI","value":"PDAI"},
+    {"label":"💼 TWD","value":"TWD"},
+    {"label":"📊 Finance","value":"Finance"},
+    {"label":"🔬 Research","value":"Research"},
+    {"label":"📝 Personal","value":"Personal"},
+]
+
+@callback(
+    Output("planner-topic-dropdown", "options"),
+    Output("planner-new-topic",      "value"),
+    Input("planner-add-topic-btn",   "n_clicks"),
+    State("planner-new-topic",       "value"),
+    State("planner-topic-dropdown",  "options"),
+    prevent_initial_call=True,
+)
+def cb_add_topic(n, new_topic, options):
+    if not new_topic or not new_topic.strip():
+        return no_update, no_update
+    label = new_topic.strip()
+    value = label
+    if any(o["value"] == value for o in (options or [])):
+        return no_update, ""
+    new_opts = list(options or []) + [{"label": f"🏷️ {label}", "value": value}]
+    return new_opts, ""
+
+
 # ── My Planner Callbacks ─────────────────────────────────────────────────────
 @callback(
     Output("planner-result",         "children"),
     Output("extracted-events-store", "data"),
     Input("planner-upload",          "contents"),
     State("planner-upload",          "filename"),
+    State("planner-topic-dropdown",  "value"),
     prevent_initial_call=True,
 )
-def cb_process_upload(contents, filename):
+def cb_process_upload(contents, filename, selected_topic):
     if not contents or not filename:
         return no_update, no_update
 
@@ -2209,8 +2374,11 @@ def cb_process_upload(contents, filename):
     ]) if _google_ok else dbc.Alert("🔌 Connect Google Calendar first to add events.", color="secondary", className="mt-2")
 
     return html.Div([
-        dbc.Alert(f"✅ Found {len(events)} event{'s' if len(events)>1 else ''} in «{filename}»",
-                  color="success", className="mb-3"),
+        html.Div(className="d-flex align-items-center gap-2 mb-3 flex-wrap", children=[
+            dbc.Alert(f"✅ Found {len(events)} event{'s' if len(events)>1 else ''} in «{filename}»",
+                      color="success", className="mb-0 py-2"),
+            dbc.Badge(f"🏷️ {selected_topic}", color="primary", className="ms-1") if selected_topic else html.Span(),
+        ]),
         *cards,
         add_section,
     ]), events
