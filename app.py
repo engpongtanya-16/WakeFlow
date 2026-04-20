@@ -985,10 +985,10 @@ def build_month_chart(events_by_date: dict, year: int, month: int) -> go.Figure:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_email_html(city: str, topics: list, user_name: str = "") -> str:
-    w      = get_weather(city)
-    events = get_calendar_events(datetime.now().strftime("%Y-%m-%d"))
-    news   = get_news(topics, 5)
-    today  = datetime.now().strftime("%A, %B %d, %Y")
+    w        = get_weather(city)
+    events   = get_calendar_events(datetime.now().strftime("%Y-%m-%d"))
+    news     = get_news(topics, 5)
+    today    = datetime.now().strftime("%A, %B %d, %Y")
     greeting = f"Hello {user_name}," if user_name.strip() else "Hello,"
 
     rows = "".join(
@@ -1227,6 +1227,14 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
             ]),
         ]),
         dbc.Col(width=5, className="d-flex justify-content-end align-items-center gap-2", children=[
+            html.A(
+                dbc.Badge(
+                    "✅ Calendar Connected" if google_connected else "🔌 Connect Google Calendar",
+                    color="success" if google_connected else "secondary",
+                    className="wf-badge",
+                ),
+                href="/connect-google", target="_blank",
+            ),
         ]),
     ]),
 
@@ -1441,13 +1449,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         # ── Tab 3: Weather ───────────────────────────────────────────────────
         dbc.Tab(tab_id="tab-weather", label="🌤️ Weather", children=[
             dbc.Row(className="mt-3 g-3", children=[
-                dbc.Col(width=12, className="mb-2", children=[
-                    html.Div(className="d-flex align-items-center gap-2", children=[
-                        html.Label("📍 City:", style={"fontWeight":"600","color":"#475569","fontSize":"14px","marginBottom":"0"}),
-                        dbc.Input(id="city-input", value="Barcelona", placeholder="Enter city name...",
-                                  debounce=True, size="sm", style={"maxWidth":"220px"}, className="wf-input"),
-                    ]),
-                ]),
                 dbc.Col(width=5, children=[html.Div(id="weather-card", className="wf-card")]),
                 dbc.Col(width=7, children=[dcc.Graph(id="weather-chart", config={"displayModeBar":False})]),
             ]),
@@ -1457,13 +1458,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
         dbc.Tab(tab_id="tab-news", label="📰 News", children=[
             dbc.Row(className="mt-3", children=[
                 dbc.Col([
-                    dbc.Checklist(
-                        id="topics-check",
-                        options=[{"label":f" {e}  {t}","value":t}
-                                 for t,e in [("Tech","🤖"),("Finance","📈"),("World","🌏"),
-                                             ("Business","💼"),("Science","🔬"),("Sports","⚽")]],
-                        value=["Tech","Finance"], inline=True, className="wf-checklist mb-3",
-                    ),
                     html.Div(id="news-list"),
                 ]),
             ]),
@@ -1487,7 +1481,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         html.P("Connect your Google account to sync your calendar events with WakeFlow.",
                                style={"fontSize":"13px","color":"#64748b","marginBottom":"16px"}),
 
-                        # ── Status (แสดงตามสถานะจริง ไม่มี "Not connected") ──
                         dbc.Alert(
                             [html.Span("✅  "), "Google Calendar is connected!"],
                             color="success", className="py-2 mb-3",
@@ -1497,10 +1490,8 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                             dbc.Input(
                                 id="gcal-email-input", type="email",
                                 placeholder="yourname@gmail.com",
-                                className="wf-input mb-2",
+                                className="wf-input mb-3",
                             ),
-                            html.P("The actual login is handled securely via Google OAuth.",
-                                   style={"fontSize":"11px","color":"#94a3b8","marginBottom":"14px"}),
                             html.A(
                                 dbc.Button("🔌 Connect Google Calendar",
                                            color="primary", size="sm"),
@@ -1508,7 +1499,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                             ),
                         ]),
 
-                        # ── ถ้า connected แล้ว แสดงปุ่ม reconnect เล็กๆ ──
                         html.Div([
                             html.A(
                                 html.Small("Reconnect with a different account →",
@@ -1517,10 +1507,55 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                             ),
                         ]) if os.path.exists(TOKEN_FILE) else html.Div(),
                     ]),
+
+                    # ── City Setting ─────────────────────────────────────────
+                    html.Div(style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                    }, children=[
+                        html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
+                            html.Span("📍", style={"fontSize":"1.4rem"}),
+                            html.H6("Your City", style={"fontWeight":"700","color":"#1e293b","margin":"0"}),
+                        ]),
+                        html.P("Set your default city for weather and morning briefing.",
+                               style={"fontSize":"13px","color":"#64748b","marginBottom":"12px"}),
+                        dbc.Input(
+                            id="city-input", value="Barcelona",
+                            placeholder="e.g. Barcelona, Bangkok, London...",
+                            debounce=True, className="wf-input",
+                        ),
+                        html.P("Used in Weather tab, AI Assistant, and daily email.",
+                               style={"fontSize":"11px","color":"#94a3b8","marginTop":"8px","marginBottom":"0"}),
+                    ]),
                 ]),
 
-                # ── Daily Email ───────────────────────────────────────────────
+                # ── Daily Email + News Preferences ────────────────────────────
                 dbc.Col(width=6, children=[
+
+                    # News Preferences
+                    html.Div(style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                        "marginBottom":"16px",
+                    }, children=[
+                        html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
+                            html.Span("📰", style={"fontSize":"1.4rem"}),
+                            html.H6("News Preferences", style={"fontWeight":"700","color":"#1e293b","margin":"0"}),
+                        ]),
+                        html.P("Choose the topics you're interested in — used in News tab and daily email.",
+                               style={"fontSize":"13px","color":"#64748b","marginBottom":"12px"}),
+                        dbc.Checklist(
+                            id="topics-check",
+                            options=[{"label": f" {e}  {t}", "value": t}
+                                     for t, e in [("Tech","🤖"),("Finance","📈"),("World","🌏"),
+                                                  ("Business","💼"),("Science","🔬"),("Sports","⚽")]],
+                            value=["Tech","Finance"],
+                            inline=True,
+                            className="wf-checklist",
+                        ),
+                    ]),
+
+                    # Daily Email
                     html.Div(style={
                         "background":"white","borderRadius":"12px",
                         "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
@@ -1535,14 +1570,12 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         dbc.Input(id="gmail-user-input", type="hidden", value=""),
                         dbc.Input(id="gmail-pass-input", type="hidden", value=""),
 
-                        # ── ชื่อ user (ข้อ 6 — สิ่งแรก) ──────────────────
                         dbc.Label("👤 Your name (for email greeting)",
                                   style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
                         dbc.Input(id="user-name-input", type="text",
                                   placeholder="e.g. Eng",
                                   className="wf-input mb-3"),
 
-                        # ── อีเมลปลายทาง (แยกจาก gcal) ──────────────────
                         dbc.Label("💌 Send briefing to",
                                   style={"fontWeight":"600","fontSize":"13px","color":"#374151"}),
                         dbc.Input(id="email-input", type="email",
@@ -2052,12 +2085,11 @@ def cb_save_schedule(n, recipient, user_name, gmail_user, gmail_pass, hour, city
                             id="daily_briefing", replace_existing=True)
     _scheduled_job["job"] = job
 
-    name_part = f" · Hi {user_name}!" if user_name else ""
     info = html.Div([
-        html.Span("⏰ Scheduled: ", style={"color":"#0b8043","fontWeight":"600"}),
-        html.Span(f"Daily at {hour:02d}:00{name_part}", style={"color":"#374151"}), html.Br(),
+        html.Span("⏰ Scheduled: ", style={"color":"#34d399","fontWeight":"600"}),
+        html.Span(f"Daily at {hour:02d}:00", style={"color":"#e2e8f0"}), html.Br(),
         html.Span("📬 To: ", style={"color":"#475569"}),
-        html.Span(recipient, style={"color":"#374151"}),
+        html.Span(recipient, style={"color":"#e2e8f0"}),
     ])
     return (dbc.Alert(f"✅ Schedule saved! Briefing will send daily at {hour:02d}:00.",
                       color="success", dismissable=True), info)
