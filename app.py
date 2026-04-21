@@ -468,7 +468,7 @@ def find_calendar_id_by_name(name: str) -> str:
 
 
 def delete_calendar_event_by_title(title: str, date: str) -> tuple[bool, str]:
-    """Find and delete a calendar event by title and date."""
+    """Find and delete a calendar event by fuzzy title match and date."""
     if not GOOGLE_AVAILABLE or not os.path.exists(TOKEN_FILE):
         return False, "Google Calendar not connected."
     try:
@@ -481,10 +481,16 @@ def delete_calendar_event_by_title(title: str, date: str) -> tuple[bool, str]:
         tmin = local_tz.localize(day.replace(hour=0,  minute=0,  second=0)).isoformat()
         tmax = local_tz.localize(day.replace(hour=23, minute=59, second=59)).isoformat()
 
-        # Search across all calendars
+        # Build keyword tokens from user title for fuzzy matching
+        # e.g. "Meeting with deltalad" → ["meeting", "deltalad"]
+        query_tokens = set(title.lower().split())
+        # Remove common stop words
+        stop_words = {"the","a","an","with","for","at","on","in","of","and","to","my","this"}
+        query_tokens -= stop_words
+
         cal_list = service.calendarList().list().execute()
-        title_lower = title.lower()
-        deleted = []
+        deleted  = []
+
         for cal in cal_list.get("items", []):
             cal_id = cal["id"]
             events = service.events().list(
@@ -492,13 +498,19 @@ def delete_calendar_event_by_title(title: str, date: str) -> tuple[bool, str]:
                 singleEvents=True, orderBy="startTime"
             ).execute()
             for ev in events.get("items", []):
-                if title_lower in ev.get("summary", "").lower():
+                ev_title_lower = ev.get("summary", "").lower()
+                ev_tokens = set(ev_title_lower.split()) - stop_words
+                # Match if any meaningful keyword overlaps
+                if query_tokens & ev_tokens:
                     service.events().delete(calendarId=cal_id, eventId=ev["id"]).execute()
                     deleted.append(ev.get("summary", title))
 
         if deleted:
             return True, f"Deleted: {', '.join(deleted)}"
-        return False, f"No event matching '{title}' found on {date}."
+        return False, (
+            f"No event matching '{title}' found on {date}. "
+            "Try using the exact event title from the calendar."
+        )
     except Exception as e:
         return False, str(e)
 
@@ -520,6 +532,7 @@ Rules:
 - Call get_news before summarising headlines
 - Keep replies under 120 words unless the user asks for more
 - Use bullet points for 3+ items
+- BEFORE deleting any event: ALWAYS call get_calendar_events first to get the EXACT event title, then use that exact title in delete_calendar_event. Never guess the title.
 
 IMPORTANT — DATE CALCULATION:
 Each message starts with [TODAY: WEEKDAY YYYY-MM-DD]. Use this as your anchor.
