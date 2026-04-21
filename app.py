@@ -1219,6 +1219,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
     dcc.Store(id="city-store",             data="Barcelona"),
     dcc.Store(id="email-settings",         data={}),
     dcc.Store(id="extracted-events-store", data=[]),
+    dcc.Store(id="deleted-event-indices",  data=[]),
 
     # Header
     dbc.Row(className="wf-header align-items-center py-3 mb-2", children=[
@@ -2269,20 +2270,22 @@ def cb_render_tasks(tasks):
 @callback(
     Output("planner-result",         "children"),
     Output("extracted-events-store", "data"),
+    Output("deleted-event-indices",  "data"),
     Input("planner-upload",          "contents"),
     State("planner-upload",          "filename"),
     State("planner-topic-dropdown",  "value"),
+    State("planner-topic-dropdown",  "options"),
     prevent_initial_call=True,
 )
-def cb_process_upload(contents, filename, selected_topic):
+def cb_process_upload(contents, filename, selected_topic, cal_options):
     if not contents or not filename:
-        return no_update, no_update
+        return no_update, no_update, no_update
 
     try:
         _ctype, content_string = contents.split(",", 1)
         decoded = base64.b64decode(content_string)
     except Exception:
-        return dbc.Alert("Could not read file.", color="danger"), []
+        return dbc.Alert("Could not read file.", color="danger"), [], []
 
     ext    = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
     events = []
@@ -2302,78 +2305,102 @@ def cb_process_upload(contents, filename, selected_topic):
                     text = "\n".join(p.extract_text() or "" for p in reader.pages)
                 except ImportError:
                     return (dbc.Alert("PDF processing requires pdfplumber. Run: pip install pdfplumber",
-                                      color="warning"), [])
+                                      color="warning"), [], [])
         except Exception as e:
-            return dbc.Alert(f"Error reading PDF: {e}", color="danger"), []
+            return dbc.Alert(f"Error reading PDF: {e}", color="danger"), [], []
         if not text.strip():
-            return dbc.Alert("Could not extract text from PDF — try uploading an image instead.", color="warning"), []
+            return dbc.Alert("Could not extract text from PDF — try uploading an image instead.", color="warning"), [], []
         events = extract_events_from_text(text)
 
     elif ext in ("png","jpg","jpeg"):
         mime   = f"image/{'jpeg' if ext == 'jpg' else ext}"
         events = extract_events_from_image(content_string, mime)
     else:
-        return dbc.Alert("Please upload a PDF or image file.", color="warning"), []
+        return dbc.Alert("Please upload a PDF or image file.", color="warning"), [], []
 
     if not events:
-        return dbc.Alert("No events found. Try a document with clear dates and times.", color="warning"), []
+        return dbc.Alert("No events found. Try a document with clear dates and times.", color="warning"), [], []
 
-    # Render extracted event cards — editable/customizable
+    # Look up calendar name from options
+    cal_name = "Primary Calendar"
+    if selected_topic and cal_options:
+        match = next((o["label"] for o in cal_options if o["value"] == selected_topic), None)
+        if match:
+            cal_name = match.replace("🗓️ ","").replace("📅 ","").strip()
+
+    # Render extracted event cards — editable/customizable, with delete button
     _google_ok = os.path.exists(TOKEN_FILE)
     cards = []
     for i, ev in enumerate(events):
-        cards.append(html.Div(className="wf-event-import-card", style={
-            "background":"#f8fafc","borderRadius":"10px",
-            "padding":"12px","marginBottom":"10px",
-            "border":"1px solid #e2e8f0",
-        }, children=[
-            html.Strong(ev.get("title","Untitled"),
-                        style={"color":"#1e293b","fontSize":"14px","display":"block","marginBottom":"8px"}),
-            html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
-                html.Span("Add as:", style={"fontSize":"12px","color":"#64748b","whiteSpace":"nowrap"}),
-                dbc.RadioItems(
-                    id={"type":"event-dest","index":i},
-                    options=[
-                        {"label":"📅 Calendar Event", "value":"calendar"},
-                        {"label":"✅ Task",            "value":"task"},
-                    ],
-                    value="calendar",
-                    inline=True,
-                    inputStyle={"marginRight":"4px"},
-                    labelStyle={"fontSize":"12px","marginRight":"12px","cursor":"pointer"},
-                ),
-            ]),
-            html.Div(className="d-flex gap-2 flex-wrap align-items-center", children=[
-                html.Span("📆", style={"fontSize":"13px"}),
-                dcc.Input(
-                    id={"type":"event-date","index":i},
-                    type="text", value=ev.get("date",""), placeholder="YYYY-MM-DD",
-                    debounce=True,
-                    style={"width":"130px","fontSize":"12px","padding":"3px 6px",
-                           "border":"1px solid #cbd5e1","borderRadius":"6px"},
-                ),
-                html.Span("🕐", style={"fontSize":"13px"}),
-                dcc.Input(
-                    id={"type":"event-start","index":i},
-                    type="text", value=ev.get("start_time",""), placeholder="Start HH:MM",
-                    debounce=True,
-                    style={"width":"100px","fontSize":"12px","padding":"3px 6px",
-                           "border":"1px solid #cbd5e1","borderRadius":"6px"},
-                ),
-                html.Span("–", style={"color":"#94a3b8"}),
-                dcc.Input(
-                    id={"type":"event-end","index":i},
-                    type="text", value=ev.get("end_time",""), placeholder="End HH:MM",
-                    debounce=True,
-                    style={"width":"100px","fontSize":"12px","padding":"3px 6px",
-                           "border":"1px solid #cbd5e1","borderRadius":"6px"},
-                ),
-                html.Span("(blank = All day)", style={"fontSize":"11px","color":"#94a3b8"}),
-            ]),
-            html.P(ev.get("description",""),
-                   style={"color":"#64748b","fontSize":"11px","margin":"6px 0 0"})
-            if ev.get("description") else html.Div(),
-        ]))
+        cards.append(html.Div(
+            id={"type":"event-card","index":i},
+            style={"background":"#f8fafc","borderRadius":"10px",
+                   "padding":"12px","marginBottom":"10px","border":"1px solid #e2e8f0"},
+            children=[
+                # Title row + delete button
+                html.Div(className="d-flex justify-content-between align-items-start mb-2", children=[
+                    html.Strong(ev.get("title","Untitled"),
+                                style={"color":"#1e293b","fontSize":"14px","flex":"1"}),
+                    html.Span("✕",
+                              id={"type":"event-delete-btn","index":i},
+                              n_clicks=0,
+                              style={"cursor":"pointer","color":"#cbd5e1","fontSize":"14px",
+                                     "fontWeight":"bold","padding":"0 4px","lineHeight":"1",
+                                     "marginLeft":"8px"},
+                    ),
+                ]),
+                # Destination toggle
+                html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
+                    html.Span("Add as:", style={"fontSize":"12px","color":"#64748b","whiteSpace":"nowrap"}),
+                    dbc.RadioItems(
+                        id={"type":"event-dest","index":i},
+                        options=[
+                            {"label":"📅 Calendar Event", "value":"calendar"},
+                            {"label":"✅ Task",            "value":"task"},
+                        ],
+                        value="calendar",
+                        inline=True,
+                        inputStyle={"marginRight":"4px"},
+                        labelStyle={"fontSize":"12px","marginRight":"12px","cursor":"pointer"},
+                    ),
+                ]),
+                # Date + time row
+                html.Div(className="d-flex gap-2 flex-wrap align-items-center", children=[
+                    html.Span("📆", style={"fontSize":"13px"}),
+                    dcc.Input(
+                        id={"type":"event-date","index":i},
+                        type="text", value=ev.get("date",""), placeholder="YYYY-MM-DD",
+                        debounce=True,
+                        style={"width":"130px","fontSize":"12px","padding":"3px 6px",
+                               "border":"1px solid #cbd5e1","borderRadius":"6px"},
+                    ),
+                    html.Span("🕐", style={"fontSize":"13px"}),
+                    dcc.Input(
+                        id={"type":"event-start","index":i},
+                        type="text", value=ev.get("start_time",""), placeholder="Start HH:MM",
+                        debounce=True,
+                        style={"width":"100px","fontSize":"12px","padding":"3px 6px",
+                               "border":"1px solid #cbd5e1","borderRadius":"6px"},
+                    ),
+                    html.Span("–", style={"color":"#94a3b8"}),
+                    dcc.Input(
+                        id={"type":"event-end","index":i},
+                        type="text", value=ev.get("end_time",""), placeholder="End HH:MM",
+                        debounce=True,
+                        style={"width":"100px","fontSize":"12px","padding":"3px 6px",
+                               "border":"1px solid #cbd5e1","borderRadius":"6px"},
+                    ),
+                    html.Span("(blank = All day)", style={"fontSize":"11px","color":"#94a3b8"}),
+                ]),
+                html.P(ev.get("description",""),
+                       style={"color":"#64748b","fontSize":"11px","margin":"6px 0 0"})
+                if ev.get("description") else html.Div(),
+            ]
+        ))
+
+    # Calendar target label (shown cleanly, not the raw ID)
+    cal_badge = dbc.Badge(f"📅 → {cal_name}", color="success", className="ms-1") \
+                if selected_topic else html.Span()
 
     add_section = html.Div(className="mt-3", children=[
         dbc.Button(
@@ -2388,11 +2415,29 @@ def cb_process_upload(contents, filename, selected_topic):
         html.Div(className="d-flex align-items-center gap-2 mb-3 flex-wrap", children=[
             dbc.Alert(f"✅ Found {len(events)} event{'s' if len(events)>1 else ''} in «{filename}»",
                       color="success", className="mb-0 py-2"),
-            dbc.Badge(f"🏷️ {selected_topic}", color="primary", className="ms-1") if selected_topic else html.Span(),
+            cal_badge,
         ]),
         *cards,
         add_section,
-    ]), events
+    ]), events, []
+
+
+# ── Hide individual event card when ✕ is clicked ─────────────────────────────
+@callback(
+    Output({"type":"event-card","index":dash.MATCH}, "style"),
+    Output("deleted-event-indices", "data", allow_duplicate=True),
+    Input({"type":"event-delete-btn","index":dash.MATCH}, "n_clicks"),
+    State("deleted-event-indices", "data"),
+    prevent_initial_call=True,
+)
+def cb_hide_event_card(n, deleted):
+    if not n:
+        return no_update, no_update
+    idx = ctx.triggered_id["index"]
+    deleted = deleted or []
+    if idx not in deleted:
+        deleted = deleted + [idx]
+    return {"display":"none"}, deleted
 
 
 @callback(
@@ -2404,21 +2449,28 @@ def cb_process_upload(contents, filename, selected_topic):
     State({"type":"event-date",  "index": dash.ALL}, "value"),
     State({"type":"event-start", "index": dash.ALL}, "value"),
     State({"type":"event-end",   "index": dash.ALL}, "value"),
+    State("deleted-event-indices",  "data"),
     State("task-store",             "data"),
     State("planner-topic-dropdown", "value"),
     prevent_initial_call=True,
 )
-def cb_add_all_events(n, events, dests, dates, starts, ends, tasks, selected_cal_id):
+def cb_add_all_events(n, events, dests, dates, starts, ends, deleted_indices, tasks, selected_cal_id):
     if not n or not events:
         return no_update, no_update
 
     tasks = tasks or []
     next_id = max((t["id"] for t in tasks), default=-1) + 1
     cal_id = selected_cal_id or "primary"
+    deleted_set = set(deleted_indices or [])
 
-    cal_success, cal_failed, task_added = 0, 0, 0
+    cal_success, task_added = 0, 0
+    error_msgs = []
 
     for i, ev in enumerate(events):
+        # Skip cards the user deleted
+        if i in deleted_set:
+            continue
+
         dest       = dests[i]  if i < len(dests)  else "calendar"
         edit_date  = dates[i]  if i < len(dates)  else ev.get("date","")
         edit_start = starts[i] if i < len(starts) else ev.get("start_time","")
@@ -2440,31 +2492,39 @@ def cb_add_all_events(n, events, dests, dates, starts, ends, tasks, selected_cal
             next_id += 1
             task_added += 1
         else:
-            ok, _ = create_calendar_event(merged, calendar_id=cal_id)
+            ok, err = create_calendar_event(merged, calendar_id=cal_id)
             if ok:
                 cal_success += 1
             else:
-                cal_failed += 1
+                error_msgs.append(f"«{merged.get('title','?')}»: {err}")
 
-    # Build human-readable calendar name for the summary
-    cal_label = "Primary Calendar" if cal_id == "primary" else cal_id.split("@")[0]
+    # Build summary
     parts = []
     if cal_success:
-        parts.append(f"📅 {cal_success} event{'s' if cal_success>1 else ''} → {cal_label}")
+        parts.append(f"📅 {cal_success} event{'s' if cal_success>1 else ''} added to Google Calendar")
     if task_added:
-        parts.append(f"✅ {task_added} task{'s' if task_added>1 else ''} → My Tasks")
-    if cal_failed:
-        parts.append(f"❌ {cal_failed} calendar item{'s' if cal_failed>1 else ''} failed")
+        parts.append(f"✅ {task_added} task{'s' if task_added>1 else ''} added to My Tasks")
 
-    if not parts:
-        return dbc.Alert("Nothing was added.", color="warning"), tasks
+    result_children = []
+    if parts:
+        color = "warning" if error_msgs else "success"
+        msg = " · ".join(parts)
+        if cal_success:
+            msg += " — Refresh My Day tab!"
+        result_children.append(dbc.Alert(f"🎉 {msg}", color=color, className="mb-2"))
 
-    color = "danger" if (cal_failed and not cal_success and not task_added) else \
-            "warning" if cal_failed else "success"
-    msg = " · ".join(parts)
-    if cal_success:
-        msg += " — Refresh My Day tab to see them!"
-    return dbc.Alert(f"🎉 {msg}", color=color), tasks
+    if error_msgs:
+        result_children.append(dbc.Alert([
+            html.Strong("❌ Some calendar events failed:"),
+            html.Ul([html.Li(e, style={"fontSize":"12px"}) for e in error_msgs], className="mb-0 mt-1"),
+            html.Small("💡 Tip: ถ้า group calendar ของ ESADE เพิ่มไม่ได้ เพราะไม่มีสิทธิ์ write — ลอง add ไปที่ Primary Calendar แทนนะ",
+                       style={"color":"#92400e"}),
+        ], color="danger"))
+
+    if not result_children:
+        result_children = [dbc.Alert("Nothing was added.", color="warning")]
+
+    return html.Div(result_children), tasks
 # ─────────────────────────────────────────────────────────────────────────────
 
 
