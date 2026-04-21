@@ -1446,7 +1446,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                             ),
                         ]),
                         html.Div(id="task-list-display"),
-                        dcc.Store(id="task-store", data=[]),
+                        dcc.Store(id="task-store", storage_type="local", data=[]),
                     ]),
                 ]),
             ]),
@@ -2317,32 +2317,80 @@ def cb_process_upload(contents, filename, selected_topic):
     if not events:
         return dbc.Alert("No events found. Try a document with clear dates and times.", color="warning"), []
 
-    # Render extracted event cards
+    # Render extracted event cards — editable/customizable
     _google_ok = os.path.exists(TOKEN_FILE)
     cards = []
-    for ev in events:
-        time_label = (f"{ev.get('start_time','')} – {ev.get('end_time','')}"
-                      if ev.get("start_time") else "All day")
-        cards.append(html.Div(className="wf-event-import-card", children=[
-            dbc.Row([
-                dbc.Col(width=12, children=[
-                    html.Strong(ev.get("title","Untitled"),
-                                style={"color":"#1e293b","fontSize":"14px"}),
-                    html.Div(className="d-flex gap-2 mt-1 flex-wrap", children=[
-                        dbc.Badge(ev.get("date",""), color="primary"),
-                        dbc.Badge(time_label, color="secondary"),
-                        dbc.Badge(ev["location"], color="info") if ev.get("location") else html.Div(),
-                    ]),
-                    html.P(ev.get("description",""),
-                           style={"color":"#64748b","fontSize":"11px","margin":"4px 0 0"})
-                    if ev.get("description") else html.Div(),
-                ]),
+    for i, ev in enumerate(events):
+        cards.append(html.Div(className="wf-event-import-card", style={
+            "background":"#f8fafc","borderRadius":"10px",
+            "padding":"12px","marginBottom":"10px",
+            "border":"1px solid #e2e8f0",
+        }, children=[
+            # Title
+            html.Strong(ev.get("title","Untitled"),
+                        style={"color":"#1e293b","fontSize":"14px","display":"block","marginBottom":"8px"}),
+
+            # Destination toggle: Calendar or Task
+            html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
+                html.Span("Add as:", style={"fontSize":"12px","color":"#64748b","whiteSpace":"nowrap"}),
+                dbc.RadioItems(
+                    id={"type":"event-dest","index":i},
+                    options=[
+                        {"label":"📅 Calendar Event", "value":"calendar"},
+                        {"label":"✅ Task",            "value":"task"},
+                    ],
+                    value="calendar",
+                    inline=True,
+                    inputStyle={"marginRight":"4px"},
+                    labelStyle={"fontSize":"12px","marginRight":"12px","cursor":"pointer"},
+                ),
             ]),
+
+            # Date + time row
+            html.Div(className="d-flex gap-2 flex-wrap align-items-center", children=[
+                html.Span("📆", style={"fontSize":"13px"}),
+                dcc.Input(
+                    id={"type":"event-date","index":i},
+                    type="text",
+                    value=ev.get("date",""),
+                    placeholder="YYYY-MM-DD",
+                    debounce=True,
+                    style={"width":"130px","fontSize":"12px","padding":"3px 6px",
+                           "border":"1px solid #cbd5e1","borderRadius":"6px"},
+                ),
+                html.Span("🕐", style={"fontSize":"13px"}),
+                dcc.Input(
+                    id={"type":"event-start","index":i},
+                    type="text",
+                    value=ev.get("start_time",""),
+                    placeholder="Start HH:MM",
+                    debounce=True,
+                    style={"width":"100px","fontSize":"12px","padding":"3px 6px",
+                           "border":"1px solid #cbd5e1","borderRadius":"6px"},
+                ),
+                html.Span("–", style={"color":"#94a3b8"}),
+                dcc.Input(
+                    id={"type":"event-end","index":i},
+                    type="text",
+                    value=ev.get("end_time",""),
+                    placeholder="End HH:MM",
+                    debounce=True,
+                    style={"width":"100px","fontSize":"12px","padding":"3px 6px",
+                           "border":"1px solid #cbd5e1","borderRadius":"6px"},
+                ),
+                html.Span("(leave time blank = All day)",
+                          style={"fontSize":"11px","color":"#94a3b8"}),
+            ]),
+
+            # Description
+            html.P(ev.get("description",""),
+                   style={"color":"#64748b","fontSize":"11px","margin":"6px 0 0"})
+            if ev.get("description") else html.Div(),
         ]))
 
     add_section = html.Div(className="mt-3", children=[
         dbc.Button(
-            f"➕ Add All {len(events)} Event{'s' if len(events) > 1 else ''} to Google Calendar",
+            f"➕ Add All {len(events)} Item{'s' if len(events) > 1 else ''}",
             id="add-all-events-btn", color="success", size="sm", n_clicks=0,
             disabled=not _google_ok,
         ),
@@ -2362,33 +2410,75 @@ def cb_process_upload(contents, filename, selected_topic):
 
 @callback(
     Output("add-events-status",     "children"),
+    Output("task-store",            "data", allow_duplicate=True),
     Input("add-all-events-btn",     "n_clicks"),
     State("extracted-events-store", "data"),
+    State({"type":"event-dest",  "index": dash.ALL}, "value"),
+    State({"type":"event-date",  "index": dash.ALL}, "value"),
+    State({"type":"event-start", "index": dash.ALL}, "value"),
+    State({"type":"event-end",   "index": dash.ALL}, "value"),
+    State("task-store",             "data"),
     prevent_initial_call=True,
 )
-def cb_add_all_events(n, events):
+def cb_add_all_events(n, events, dests, dates, starts, ends, tasks):
     if not n or not events:
-        return no_update
-    success, failed = 0, 0
-    for ev in events:
-        ok, _ = create_calendar_event(ev)
-        if ok:
-            success += 1
-        else:
-            failed += 1
+        return no_update, no_update
 
-    if failed == 0:
-        return dbc.Alert(
-            f"🎉 Added {success} event{'s' if success > 1 else ''} to Google Calendar! "
-            "Refresh the My Day tab to see them.",
-            color="success",
-        )
-    elif success == 0:
-        return dbc.Alert(
-            "❌ Failed. If you see a permissions error, delete google_token.json and reconnect.",
-            color="danger",
-        )
-    return dbc.Alert(f"⚠️ Added {success} event(s). {failed} failed.", color="warning")
+    tasks = tasks or []
+    next_id = max((t["id"] for t in tasks), default=-1) + 1
+
+    cal_success, cal_failed, task_added = 0, 0, 0
+
+    for i, ev in enumerate(events):
+        # Read edited values (fall back to original if list is shorter)
+        dest       = dests[i]  if i < len(dests)  else "calendar"
+        edit_date  = dates[i]  if i < len(dates)  else ev.get("date","")
+        edit_start = starts[i] if i < len(starts) else ev.get("start_time","")
+        edit_end   = ends[i]   if i < len(ends)   else ev.get("end_time","")
+
+        # Build merged event dict with user edits
+        merged = {**ev,
+                  "date":       (edit_date  or "").strip() or ev.get("date",""),
+                  "start_time": (edit_start or "").strip() or None,
+                  "end_time":   (edit_end   or "").strip() or None}
+
+        if dest == "task":
+            # Add to task store
+            due_str = merged.get("date") or None
+            tasks.append({
+                "id":       next_id,
+                "text":     merged.get("title","Imported Task"),
+                "category": "assignment",
+                "done":     False,
+                "due":      due_str,
+            })
+            next_id += 1
+            task_added += 1
+        else:
+            ok, _ = create_calendar_event(merged)
+            if ok:
+                cal_success += 1
+            else:
+                cal_failed += 1
+
+    # Build summary message
+    parts = []
+    if cal_success:
+        parts.append(f"📅 {cal_success} event{'s' if cal_success>1 else ''} added to Google Calendar")
+    if task_added:
+        parts.append(f"✅ {task_added} task{'s' if task_added>1 else ''} added to My Tasks")
+    if cal_failed:
+        parts.append(f"❌ {cal_failed} calendar event{'s' if cal_failed>1 else ''} failed")
+
+    if not parts:
+        return dbc.Alert("Nothing was added.", color="warning"), tasks
+
+    color = "danger" if (cal_failed and not cal_success and not task_added) else \
+            "warning" if cal_failed else "success"
+    msg = " · ".join(parts)
+    if cal_success:
+        msg += " — Refresh My Day tab to see them!"
+    return dbc.Alert(f"🎉 {msg}", color=color), tasks
 # ─────────────────────────────────────────────────────────────────────────────
 
 
