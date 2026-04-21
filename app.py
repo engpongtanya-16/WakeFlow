@@ -1636,9 +1636,24 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
 
         # ── Tab 3: Weather ───────────────────────────────────────────────────
         dbc.Tab(tab_id="tab-weather", label="🌤️ Weather", children=[
-            dbc.Row(className="mt-3 g-3", children=[
-                dbc.Col(width=5, children=[html.Div(id="weather-card", className="wf-card")]),
-                dbc.Col(width=7, children=[dcc.Graph(id="weather-chart", config={"displayModeBar":False})]),
+            html.Div(className="mt-3", children=[
+                # City search bar
+                html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
+                    html.Span("📍", style={"fontSize":"16px"}),
+                    dbc.Input(
+                        id="weather-city-input",
+                        placeholder="Search city — e.g. Tokyo, London, Bangkok...",
+                        type="text",
+                        debounce=True,
+                        size="sm",
+                        style={"maxWidth":"320px","fontSize":"13px"},
+                    ),
+                    html.Small("Updates User Info city too", style={"color":"#94a3b8","fontSize":"11px"}),
+                ]),
+                dbc.Row(className="g-3", children=[
+                    dbc.Col(width=5, children=[html.Div(id="weather-card", className="wf-card")]),
+                    dbc.Col(width=7, children=[dcc.Graph(id="weather-chart", config={"displayModeBar":False})]),
+                ]),
             ]),
         ]),
 
@@ -2342,12 +2357,18 @@ def cb_vote(up_clicks, down_clicks, history):
 
 
 @callback(
-    Output("weather-card",  "children"),
-    Output("weather-chart", "figure"),
-    Input("city-input",     "value"),
+    Output("weather-card",       "children"),
+    Output("weather-chart",      "figure"),
+    Output("city-store",         "data", allow_duplicate=True),
+    Output("city-input",         "value"),
+    Input("city-input",          "value"),
+    Input("weather-city-input",  "value"),
+    prevent_initial_call=False,
 )
-def cb_weather(city):
-    city = city or "Barcelona"
+def cb_weather(city_settings, city_weather):
+    # Whichever was changed most recently wins
+    triggered = ctx.triggered_id
+    city = (city_weather if triggered == "weather-city-input" else city_settings) or "Barcelona"
     w    = get_weather(city)
 
     if w.get("error"):
@@ -2364,7 +2385,7 @@ def cb_weather(city):
             html.H2(f"📍 {city}", className="wf-card-title"),
             html.P("⚠️ " + w.get("message","Weather data unavailable."),
                    style={"color":"#9ca3af","fontSize":"13px"}),
-        ]), empty_fig
+        ]), empty_fig, city, city
 
     t = w["temp"]
     if   t >= 35: advice, color = "🥵 Very hot! Stay hydrated.", "#dc2626"
@@ -2401,7 +2422,7 @@ def cb_weather(city):
         yaxis2=dict(showgrid=False, showticklabels=False, zeroline=False, overlaying="y", range=[0,130]),
         bargap=0.4, barmode="group",
     )
-    return card, fig
+    return card, fig, city, city
 
 
 @callback(
