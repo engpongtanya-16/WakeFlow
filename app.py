@@ -1648,7 +1648,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         size="sm",
                         style={"maxWidth":"320px","fontSize":"13px"},
                     ),
-                    html.Small("Updates User Info city too", style={"color":"#94a3b8","fontSize":"11px"}),
                 ]),
                 dbc.Row(className="g-3", children=[
                     dbc.Col(width=5, children=[html.Div(id="weather-card", className="wf-card")]),
@@ -2348,22 +2347,15 @@ def cb_vote(up_clicks, down_clicks, history):
 
 
 @callback(
-    Output("city-store", "data", allow_duplicate=True),
-    Output("city-input", "value"),
-    Input("weather-city-input", "value"),
-    prevent_initial_call=True,
-)
-def cb_sync_weather_city(city):
-    city = (city or "").strip() or "Barcelona"
-    return city, city
-
-
-@callback(
     Output("weather-card",  "children"),
     Output("weather-chart", "figure"),
-    Input("city-store",     "data"),
+    Input("city-store",          "data"),
+    Input("weather-city-input",  "value"),
 )
-def cb_weather(city):
+def cb_weather(city_store, city_weather):
+    city = (city_weather or "").strip() if ctx.triggered_id == "weather-city-input" \
+           else (city_store or "Barcelona")
+    city = city or "Barcelona"
     w    = get_weather(city)
 
     if w.get("error"):
