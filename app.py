@@ -1400,7 +1400,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                                     ),
                                     dbc.Input(
                                         id="manual-event-location",
-                                        placeholder="📍 Location (optional)",
+                                        placeholder="📍 Location (optional) — e.g. BCN Airport",
                                         type="text", size="sm", className="mb-2",
                                         style={"fontSize":"13px"},
                                     ),
@@ -2605,6 +2605,19 @@ def cb_hide_event_card(n, deleted):
     if idx not in deleted:
         deleted = deleted + [idx]
     return {"display":"none"}, deleted
+
+
+@callback(
+    Output("add-all-events-btn", "children"),
+    Input("deleted-event-indices",  "data"),
+    State("extracted-events-store", "data"),
+)
+def cb_update_add_btn_label(deleted, events):
+    total = len(events or [])
+    remaining = total - len(deleted or [])
+    if remaining <= 0:
+        return "➕ Add All Items"
+    return f"➕ Add All {remaining} Item{'s' if remaining > 1 else ''}"
 
 
 @callback(
