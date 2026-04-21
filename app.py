@@ -1435,7 +1435,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                 html.Span("🌅", style={"fontSize":"2.2rem"}),
                 html.Div([
                     html.H3("WakeFlow", className="wf-logo mb-0"),
-                    html.P(datetime.now().strftime("%A, %B %d, %Y"), className="wf-subtitle mb-0"),
+                    html.P(id="header-date-display", className="wf-subtitle mb-0"),
                 ]),
             ]),
         ]),
@@ -1458,7 +1458,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         dbc.Tab(tab_id="view-day", label="Day", children=[
                             html.Div(className="d-flex align-items-center gap-3 mt-2 mb-2", children=[
                                 dcc.DatePickerSingle(
-                                    id="date-picker", date=datetime.now().date(),
+                                    id="date-picker", date=(__import__('pytz').timezone('Europe/Madrid') and datetime.now(__import__('pytz').timezone('Europe/Madrid')).date()),
                                     display_format="D MMM YYYY", className="wf-datepicker",
                                 ),
                                 html.Div(id="selected-date-label",
@@ -1935,6 +1935,16 @@ def cb_store_city(city):
     return city or "Barcelona"
 
 
+@callback(Output("header-date-display", "children"), Input("gcal-status-interval", "n_intervals"))
+def cb_header_date(n):
+    try:
+        import pytz
+        now = datetime.now(pytz.timezone("Europe/Madrid"))
+    except Exception:
+        now = datetime.now()
+    return now.strftime("%A, %B %d, %Y")
+
+
 # Sync: User Info checklist → News filter (one-way only to avoid circular)
 @callback(
     Output("news-topic-filter", "value"),
@@ -2267,7 +2277,13 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
     bubbles = [_bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
                            "I'll check your calendar, weather, and news automatically.")]
 
-    today_tag = datetime.now().strftime("%A %Y-%m-%d")
+    try:
+        import pytz
+        local_tz  = pytz.timezone("Europe/Madrid")
+        now_local = datetime.now(local_tz)
+    except Exception:
+        now_local = datetime.now()
+    today_tag = now_local.strftime("%A %Y-%m-%d")
     enriched  = f"[TODAY: {today_tag}] [CITY: {city}] [TOPICS: {', '.join(topics)}] {user_text}"
     history.append({"role": "user", "content": enriched})
 
