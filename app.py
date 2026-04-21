@@ -169,12 +169,18 @@ def get_news(topics: list, n: int = 8) -> list:
                                         else f"{h}h ago" if h < 24 else f"{h//24}d ago")
                             except Exception:
                                 ago = ""
+                            # Tag article with matching topic
+                            title_lower = a["title"].lower()
+                            matched_topic = next(
+                                (t for t in topics if t.lower() in title_lower), topics[0]
+                            )
                             out.append({
                                 "title":       a["title"],
                                 "description": a.get("description") or "",
                                 "source":      a["source"]["name"],
                                 "time":        ago,
                                 "url":         a.get("url",""),
+                                "topic":       matched_topic,
                             })
                         if out:
                             return out
@@ -1339,7 +1345,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
     ]),
 
     # Tabs
-    dbc.Tabs(id="main-tabs", active_tab="tab-day", className="wf-tabs", children=[
+    dbc.Tabs(id="main-tabs", active_tab="tab-settings", className="wf-tabs", children=[
 
         # ── Tab 1: My Day ────────────────────────────────────────────────────
         dbc.Tab(tab_id="tab-day", label="📅 My Day", children=[
@@ -1638,15 +1644,29 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
 
         # ── Tab 4: News ──────────────────────────────────────────────────────
         dbc.Tab(tab_id="tab-news", label="📰 News", children=[
-            dbc.Row(className="mt-3", children=[
-                dbc.Col([
-                    html.Div(id="news-list"),
+            html.Div(className="mt-3", children=[
+                # Topic filter chips
+                html.Div(className="d-flex align-items-center gap-2 flex-wrap mb-3", children=[
+                    html.Span("Filter:", style={"fontSize":"13px","color":"#64748b","fontWeight":"600"}),
+                    dbc.Checklist(
+                        id="news-topic-filter",
+                        options=[{"label": f"{e} {t}", "value": t}
+                                 for t, e in [("Tech","🤖"),("Finance","📈"),("World","🌏"),
+                                              ("Business","💼"),("Science","🔬"),("Sports","⚽")]],
+                        value=["Tech","Finance"],
+                        inline=True,
+                        inputClassName="btn-check",
+                        labelClassName="btn btn-sm btn-outline-secondary me-1 mb-1",
+                        labelCheckedClassName="btn btn-sm btn-warning me-1 mb-1",
+                        style={"fontSize":"12px"},
+                    ),
                 ]),
+                html.Div(id="news-list"),
             ]),
         ]),
 
-        # ── Tab 5: Settings ──────────────────────────────────────────────────
-        dbc.Tab(tab_id="tab-settings", label="⚙️ Settings", children=[
+        # ── Tab 5: User Info ─────────────────────────────────────────────────
+        dbc.Tab(tab_id="tab-settings", label="👤 User Info", children=[
             dbc.Row(className="mt-3 g-3", children=[
 
                 # ── Google Calendar ──────────────────────────────────────────
@@ -1800,6 +1820,24 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
 @callback(Output("city-store","data"), Input("city-input","value"))
 def cb_store_city(city):
     return city or "Barcelona"
+
+
+# Sync: User Info checklist → News filter
+@callback(
+    Output("news-topic-filter", "value"),
+    Input("topics-check", "value"),
+)
+def cb_sync_to_news_filter(topics):
+    return topics or ["Tech", "Finance"]
+
+
+# Sync: News filter → User Info checklist
+@callback(
+    Output("topics-check", "value"),
+    Input("news-topic-filter", "value"),
+)
+def cb_sync_to_topics_check(topics):
+    return topics or ["Tech", "Finance"]
 
 
 @callback(
@@ -2369,22 +2407,63 @@ def cb_weather(city):
 @callback(
     Output("news-list",    "children"),
     Output("topics-store", "data"),
-    Input("topics-check",  "value"),
+    Input("news-topic-filter", "value"),
 )
 def cb_news(topics):
     topics   = topics or ["Tech"]
-    articles = get_news(topics, 10)
+    articles = get_news(topics, 12)
     if not articles:
         return dbc.Alert("No news — add NEWS_API_KEY to your .env file", color="secondary"), topics
-    cards = [dbc.Card(className="wf-news-card mb-2", children=dbc.CardBody([
-        html.H6(a["title"], className="wf-news-title"),
-        html.P((a["description"] or "")[:110] + ("…" if len(a.get("description",""))>110 else ""), className="wf-news-desc"),
-        html.Div(className="d-flex align-items-center", children=[
-            dbc.Badge(a["source"], color="secondary", className="me-2"),
-            html.Span(a["time"], className="wf-news-time"),
-            html.A("Read →", href=a["url"], target="_blank", className="ms-auto wf-news-link"),
-        ]),
-    ])) for a in articles]
+
+    # Color palette cycling per topic
+    TOPIC_COLORS = {
+        "Tech":     ("#6366f1", "#eef2ff"),  # indigo
+        "Finance":  ("#059669", "#ecfdf5"),  # emerald
+        "World":    ("#0ea5e9", "#f0f9ff"),  # sky
+        "Business": ("#f59e0b", "#fffbeb"),  # amber
+        "Science":  ("#8b5cf6", "#f5f3ff"),  # violet
+        "Sports":   ("#ef4444", "#fef2f2"),  # red
+    }
+    DEFAULT_COLORS = ("#f97316", "#fff7ed")
+
+    cards = []
+    for a in articles:
+        topic    = a.get("topic", topics[0] if topics else "Tech")
+        accent, bg = TOPIC_COLORS.get(topic, DEFAULT_COLORS)
+        cards.append(
+            html.Div(style={
+                "background": bg,
+                "borderRadius": "12px",
+                "padding": "16px 18px",
+                "marginBottom": "10px",
+                "borderLeft": f"4px solid {accent}",
+                "boxShadow": "0 1px 3px rgba(0,0,0,0.06)",
+            }, children=[
+                html.Div(className="d-flex justify-content-between align-items-start gap-2", children=[
+                    html.Div(style={"flex":"1"}, children=[
+                        html.Div(className="d-flex align-items-center gap-2 mb-1", children=[
+                            dbc.Badge(topic, style={
+                                "background": accent, "fontSize":"10px",
+                                "padding":"2px 8px","borderRadius":"20px",
+                            }),
+                            dbc.Badge(a["source"], color="light",
+                                      text_color="secondary", style={"fontSize":"10px"}),
+                            html.Span(a["time"], style={"fontSize":"11px","color":"#94a3b8"}),
+                        ]),
+                        html.Strong(a["title"], style={
+                            "fontSize":"14px","color":"#1e293b",
+                            "lineHeight":"1.4","display":"block","marginBottom":"4px",
+                        }),
+                        html.P((a["description"] or "")[:120] + ("…" if len(a.get("description","")) > 120 else ""),
+                               style={"fontSize":"12px","color":"#64748b","margin":"0"}),
+                    ]),
+                    html.A("Read →", href=a["url"], target="_blank", style={
+                        "fontSize":"12px","color": accent,"fontWeight":"600",
+                        "whiteSpace":"nowrap","textDecoration":"none","paddingTop":"2px",
+                    }),
+                ]),
+            ])
+        )
     return html.Div(cards), topics
 
 
