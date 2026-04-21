@@ -37,6 +37,7 @@ _APP_DIR            = os.path.dirname(os.path.abspath(__file__))
 TOKEN_FILE          = os.path.join(_APP_DIR, "google_token.json")
 CLIENT_SECRETS_FILE = os.path.join(_APP_DIR, "credentials.json")
 FEEDBACK_FILE       = os.path.join(_APP_DIR, "feedback.json")
+TOOL_USAGE_FILE     = os.path.join(_APP_DIR, "tool_usage.json")
 
 # Write credentials.json from env var if not exists
 _creds_env = os.getenv("GOOGLE_CREDENTIALS", "")
@@ -86,6 +87,31 @@ def save_feedback(data: dict):
     try:
         with open(FEEDBACK_FILE, "w") as f:
             json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL USAGE TRACKING
+# ─────────────────────────────────────────────────────────────────────────────
+
+def load_tool_usage() -> dict:
+    if os.path.exists(TOOL_USAGE_FILE):
+        try:
+            with open(TOOL_USAGE_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"get_weather": 0, "get_news": 0, "get_calendar_events": 0,
+            "create_calendar_event": 0, "add_task": 0}
+
+
+def track_tool_call(tool_name: str):
+    usage = load_tool_usage()
+    usage[tool_name] = usage.get(tool_name, 0) + 1
+    try:
+        with open(TOOL_USAGE_FILE, "w") as f:
+            json.dump(usage, f, indent=2)
     except Exception:
         pass
 
@@ -492,28 +518,102 @@ LLM_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_calendar_event",
+            "description": (
+                "Create a new event in the user's Google Calendar. "
+                "Use this when the user asks to add, schedule, or create a meeting/event/appointment. "
+                "Resolve relative dates like 'tomorrow', 'next Monday', 'this Friday' to YYYY-MM-DD based on today's date."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title":      {"type":"string", "description":"Event title"},
+                    "date":       {"type":"string", "description":"Date in YYYY-MM-DD format"},
+                    "start_time": {"type":"string", "description":"Start time HH:MM (24h), omit for all-day"},
+                    "end_time":   {"type":"string", "description":"End time HH:MM (24h), omit for all-day"},
+                    "description":{"type":"string", "description":"Optional description"},
+                },
+                "required": ["title", "date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_task",
+            "description": (
+                "Add a task or to-do item to the user's My Tasks list. "
+                "Use this when the user says 'remind me', 'add a task', 'I need to do', or similar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text":     {"type":"string", "description":"Task description"},
+                    "due_date": {"type":"string", "description":"Due date YYYY-MM-DD (optional)"},
+                    "category": {
+                        "type":"string",
+                        "enum":["todo","assignment","work","personal"],
+                        "description":"Task category"
+                    },
+                },
+                "required": ["text"],
+            },
+        },
+    },
 ]
 
 
-def _run_tool(name: str, args: dict, city: str, topics: list) -> str:
+def _run_tool(name: str, args: dict, city: str, topics: list) -> tuple[str, dict | None]:
+    """Returns (result_json, pending_task_or_event) where pending is used for UI side-effects."""
+    track_tool_call(name)
+
     if name == "get_weather":
-        return json.dumps(get_weather(args.get("city",city)))
+        return json.dumps(get_weather(args.get("city", city))), None
+
     if name == "get_news":
-        arts = get_news(args.get("topics",topics), args.get("n",5))
-        return json.dumps({"articles":[{"title":a["title"],"source":a["source"]} for a in arts]})
+        arts = get_news(args.get("topics", topics), args.get("n", 5))
+        return json.dumps({"articles": [{"title": a["title"], "source": a["source"]} for a in arts]}), None
+
     if name == "get_calendar_events":
         d = args.get("date", datetime.now().strftime("%Y-%m-%d"))
-        return json.dumps({"date":d,"events":get_calendar_events(d)})
-    return json.dumps({"error":f"Unknown tool: {name}"})
+        return json.dumps({"date": d, "events": get_calendar_events(d)}), None
+
+    if name == "create_calendar_event":
+        event_data = {
+            "title":       args.get("title", "New Event"),
+            "date":        args.get("date",  datetime.now().strftime("%Y-%m-%d")),
+            "start_time":  args.get("start_time") or None,
+            "end_time":    args.get("end_time")   or None,
+            "description": args.get("description") or None,
+        }
+        ok, result = create_calendar_event(event_data)
+        if ok:
+            return json.dumps({"success": True, "message": f"Event '{event_data['title']}' created on {event_data['date']}"}), None
+        return json.dumps({"success": False, "error": result}), None
+
+    if name == "add_task":
+        task = {
+            "text":     args.get("text", "New Task"),
+            "due_date": args.get("due_date") or None,
+            "category": args.get("category", "todo"),
+        }
+        return json.dumps({"success": True, "message": f"Task '{task['text']}' added to My Tasks."}), task
+
+    return json.dumps({"error": f"Unknown tool: {name}"}), None
 
 
-def chat_with_tools(history: list, city: str, topics: list) -> str:
+def chat_with_tools(history: list, city: str, topics: list) -> tuple[str, list]:
+    """Returns (ai_reply, new_tasks_to_add)."""
     if not OPENAI_API_KEY:
-        return "No OpenAI API key configured. Add OPENAI_API_KEY to your .env file."
+        return "No OpenAI API key configured. Add OPENAI_API_KEY to your .env file.", []
 
     from openai import OpenAI
     client   = OpenAI(api_key=OPENAI_API_KEY)
-    messages = [{"role":"system","content":SYSTEM_PROMPT}, *history]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history]
+    pending_tasks = []
 
     try:
         resp = client.chat.completions.create(
@@ -527,18 +627,20 @@ def chat_with_tools(history: list, city: str, topics: list) -> str:
             rounds += 1
             messages.append(msg)
             for tc in msg.tool_calls:
-                args   = json.loads(tc.function.arguments)
-                result = _run_tool(tc.function.name, args, city, topics)
-                messages.append({"role":"tool","tool_call_id":tc.id,"content":result})
+                args          = json.loads(tc.function.arguments)
+                result, extra = _run_tool(tc.function.name, args, city, topics)
+                if extra and tc.function.name == "add_task":
+                    pending_tasks.append(extra)
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             resp = client.chat.completions.create(
                 model="gpt-4o-mini", messages=messages,
                 tools=LLM_TOOLS, tool_choice="auto", max_tokens=500,
             )
             msg = resp.choices[0].message
 
-        return msg.content or "Sorry, no response."
+        return msg.content or "Sorry, no response.", pending_tasks
     except Exception as e:
-        return f"AI error: {e}"
+        return f"AI error: {e}", []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1664,6 +1766,22 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                         html.Div(id="schedule-info",   className="mt-1",
                                  style={"fontSize":"12px"}),
                     ]),
+
+                    # ── Tool Usage Analytics ──────────────────────────────────
+                    html.Div(style={
+                        "background":"white","borderRadius":"12px",
+                        "padding":"20px","boxShadow":"0 1px 4px rgba(0,0,0,0.08)",
+                        "marginTop":"16px",
+                    }, children=[
+                        html.Div(className="d-flex align-items-center gap-2 mb-3", children=[
+                            html.Span("📊", style={"fontSize":"1.4rem"}),
+                            html.H6("AI Tool Usage Analytics", style={"fontWeight":"700","color":"#1e293b","margin":"0"}),
+                        ]),
+                        html.P("Tracks which AI tools the chatbot calls most often.",
+                               style={"fontSize":"12px","color":"#64748b","marginBottom":"12px"}),
+                        html.Div(id="tool-usage-display"),
+                        dcc.Interval(id="tool-usage-interval", interval=10000, n_intervals=0),
+                    ]),
                 ]),
 
             ]),
@@ -1682,6 +1800,44 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
 @callback(Output("city-store","data"), Input("city-input","value"))
 def cb_store_city(city):
     return city or "Barcelona"
+
+
+@callback(
+    Output("tool-usage-display", "children"),
+    Input("tool-usage-interval", "n_intervals"),
+)
+def cb_tool_usage(n):
+    usage = load_tool_usage()
+    total = sum(usage.values())
+    if total == 0:
+        return html.P("No tool calls yet — start chatting with the AI! 🤖",
+                      style={"color":"#94a3b8","fontSize":"12px"})
+    labels = {
+        "get_calendar_events":  "📅 Check Calendar",
+        "get_weather":          "🌤️ Get Weather",
+        "get_news":             "📰 Fetch News",
+        "create_calendar_event":"➕ Create Event",
+        "add_task":             "✅ Add Task",
+    }
+    rows = []
+    for key, label in labels.items():
+        count = usage.get(key, 0)
+        pct   = int(count / total * 100) if total else 0
+        rows.append(html.Div(className="mb-2", children=[
+            html.Div(className="d-flex justify-content-between mb-1", children=[
+                html.Span(label, style={"fontSize":"12px","color":"#374151"}),
+                html.Span(f"{count} calls ({pct}%)", style={"fontSize":"11px","color":"#94a3b8"}),
+            ]),
+            html.Div(style={"background":"#f1f5f9","borderRadius":"4px","height":"6px"}, children=[
+                html.Div(style={
+                    "background":"#f97316","borderRadius":"4px",
+                    "height":"6px","width":f"{pct}%","transition":"width 0.3s",
+                }),
+            ]),
+        ]))
+    rows.append(html.Small(f"Total: {total} tool calls",
+                           style={"color":"#94a3b8","fontSize":"11px","marginTop":"6px","display":"block"}))
+    return html.Div(rows)
 
 
 @callback(
@@ -1945,31 +2101,47 @@ def cb_show_map(n, loc_data):
     Output("chat-window",  "children"),
     Output("chat-store",   "data"),
     Output("chat-input",   "value"),
+    Output("task-store",   "data", allow_duplicate=True),
     Input("send-btn",      "n_clicks"),
     Input("chat-input",    "n_submit"),
     State("chat-input",    "value"),
     State("chat-store",    "data"),
     State("city-store",    "data"),
     State("topics-check",  "value"),
+    State("task-store",    "data"),
     prevent_initial_call=True,
 )
-def cb_chat(n_clicks, n_submit, user_text, history, city, topics):
+def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
     user_text = user_text or ""
     if not user_text.strip():
-        return no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update
 
     city    = city    or "Barcelona"
     topics  = topics  or ["Tech","Finance"]
     history = history or []
+    tasks   = tasks   or []
 
     bubbles = [_bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
                            "I'll check your calendar, weather, and news automatically.")]
 
     today_tag = datetime.now().strftime("%A %Y-%m-%d")
     enriched  = f"[TODAY: {today_tag}] [CITY: {city}] [TOPICS: {', '.join(topics)}] {user_text}"
-    history.append({"role":"user","content":enriched})
-    reply = chat_with_tools(history, city, topics)
-    history.append({"role":"assistant","content":reply})
+    history.append({"role": "user", "content": enriched})
+
+    reply, pending_tasks = chat_with_tools(history, city, topics)
+    history.append({"role": "assistant", "content": reply})
+
+    # Add any tasks the AI created to the task store
+    next_id = max((t["id"] for t in tasks), default=-1) + 1
+    for pt in pending_tasks:
+        tasks.append({
+            "id":       next_id,
+            "text":     pt["text"],
+            "category": pt.get("category", "todo"),
+            "done":     False,
+            "due":      pt.get("due_date") or None,
+        })
+        next_id += 1
 
     for m in history:
         if m["role"] == "user":
@@ -1978,7 +2150,7 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics):
         elif m["role"] == "assistant":
             bubbles.append(_bubble_ai(m["content"]))
 
-    return bubbles, history, ""
+    return bubbles, history, "", tasks
 
 
 # ── Manual Add Event to Google Calendar ───────────────────────────────────────
