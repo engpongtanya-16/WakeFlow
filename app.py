@@ -1837,21 +1837,12 @@ def cb_store_city(city):
     return city or "Barcelona"
 
 
-# Sync: User Info checklist → News filter
+# Sync: User Info checklist → News filter (one-way only to avoid circular)
 @callback(
     Output("news-topic-filter", "value"),
     Input("topics-check", "value"),
 )
 def cb_sync_to_news_filter(topics):
-    return topics or ["Tech", "Finance"]
-
-
-# Sync: News filter → User Info checklist
-@callback(
-    Output("topics-check", "value"),
-    Input("news-topic-filter", "value"),
-)
-def cb_sync_to_topics_check(topics):
     return topics or ["Tech", "Finance"]
 
 
@@ -2357,18 +2348,22 @@ def cb_vote(up_clicks, down_clicks, history):
 
 
 @callback(
-    Output("weather-card",       "children"),
-    Output("weather-chart",      "figure"),
-    Output("city-store",         "data", allow_duplicate=True),
-    Output("city-input",         "value"),
-    Input("city-input",          "value"),
-    Input("weather-city-input",  "value"),
-    prevent_initial_call=False,
+    Output("city-store", "data", allow_duplicate=True),
+    Output("city-input", "value"),
+    Input("weather-city-input", "value"),
+    prevent_initial_call=True,
 )
-def cb_weather(city_settings, city_weather):
-    # Whichever was changed most recently wins
-    triggered = ctx.triggered_id
-    city = (city_weather if triggered == "weather-city-input" else city_settings) or "Barcelona"
+def cb_sync_weather_city(city):
+    city = (city or "").strip() or "Barcelona"
+    return city, city
+
+
+@callback(
+    Output("weather-card",  "children"),
+    Output("weather-chart", "figure"),
+    Input("city-store",     "data"),
+)
+def cb_weather(city):
     w    = get_weather(city)
 
     if w.get("error"):
@@ -2385,7 +2380,7 @@ def cb_weather(city_settings, city_weather):
             html.H2(f"📍 {city}", className="wf-card-title"),
             html.P("⚠️ " + w.get("message","Weather data unavailable."),
                    style={"color":"#9ca3af","fontSize":"13px"}),
-        ]), empty_fig, city, city
+        ]), empty_fig
 
     t = w["temp"]
     if   t >= 35: advice, color = "🥵 Very hot! Stay hydrated.", "#dc2626"
@@ -2422,7 +2417,7 @@ def cb_weather(city_settings, city_weather):
         yaxis2=dict(showgrid=False, showticklabels=False, zeroline=False, overlaying="y", range=[0,130]),
         bargap=0.4, barmode="group",
     )
-    return card, fig, city, city
+    return card, fig
 
 
 @callback(
