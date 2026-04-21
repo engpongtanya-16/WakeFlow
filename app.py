@@ -1398,12 +1398,6 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                                         size="sm", rows=2, className="mb-2",
                                         style={"fontSize":"13px","resize":"none"},
                                     ),
-                                    dbc.Input(
-                                        id="manual-event-location",
-                                        placeholder="Location (optional)",
-                                        type="text", size="sm", className="mb-2",
-                                        style={"fontSize":"13px"},
-                                    ),
                                     dbc.Row(className="g-2 mb-2", children=[
                                         dbc.Col(width=5, children=[
                                             html.Small("📆 Date", style={"color":"#64748b","fontSize":"11px"}),
@@ -1976,55 +1970,80 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics):
 
 
 # ── Manual Add Event to Google Calendar ───────────────────────────────────────
+def _normalize_time(t: str) -> str | None:
+    """Convert various time formats (16.35, 1635, 16:35) → '16:35', or None if blank."""
+    if not t:
+        return None
+    t = t.strip().replace(".", ":").replace(",", ":")
+    # Handle 4-digit no-separator: 1635 → 16:35
+    if len(t) == 4 and t.isdigit():
+        t = t[:2] + ":" + t[2:]
+    # Validate HH:MM
+    parts = t.split(":")
+    if len(parts) == 2:
+        try:
+            h, m = int(parts[0]), int(parts[1])
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return f"{h:02d}:{m:02d}"
+        except ValueError:
+            pass
+    return None
+
+
 @callback(
-    Output("manual-add-status",     "children"),
-    Output("manual-event-title",    "value"),
-    Output("manual-event-desc",     "value"),
-    Output("manual-event-location", "value"),
-    Output("manual-event-date",     "date"),
-    Output("manual-event-start",    "value"),
-    Output("manual-event-end",      "value"),
-    Input("manual-add-btn",         "n_clicks"),
-    State("manual-event-title",     "value"),
-    State("manual-event-desc",      "value"),
-    State("manual-event-location",  "value"),
-    State("manual-event-date",      "date"),
-    State("manual-event-start",     "value"),
-    State("manual-event-end",       "value"),
+    Output("manual-add-status",  "children"),
+    Output("manual-event-title", "value"),
+    Output("manual-event-desc",  "value"),
+    Output("manual-event-date",  "date"),
+    Output("manual-event-start", "value"),
+    Output("manual-event-end",   "value"),
+    Input("manual-add-btn",      "n_clicks"),
+    State("manual-event-title",  "value"),
+    State("manual-event-desc",   "value"),
+    State("manual-event-date",   "date"),
+    State("manual-event-start",  "value"),
+    State("manual-event-end",    "value"),
     State("planner-topic-dropdown", "value"),
     prevent_initial_call=True,
 )
-def cb_manual_add_event(n, title, desc, location, date, start_time, end_time, cal_id):
+def cb_manual_add_event(n, title, desc, date, start_raw, end_raw, cal_id):
     if not n:
-        return (no_update,) * 7
+        return (no_update,) * 6
     if not title or not title.strip():
         return dbc.Alert("⚠️ Please enter an event title.", color="warning"), \
-               no_update, no_update, no_update, no_update, no_update, no_update
+               no_update, no_update, no_update, no_update, no_update
     if not date:
         return dbc.Alert("⚠️ Please select a date.", color="warning"), \
-               no_update, no_update, no_update, no_update, no_update, no_update
+               no_update, no_update, no_update, no_update, no_update
+
+    start_time = _normalize_time(start_raw)
+    end_time   = _normalize_time(end_raw)
+
+    # Warn if time was typed but couldn't be parsed
+    if start_raw and start_raw.strip() and start_time is None:
+        return dbc.Alert(f"⚠️ Invalid start time '{start_raw}'. Use HH:MM format (e.g. 09:30).", color="warning"), \
+               no_update, no_update, no_update, no_update, no_update
 
     event_data = {
-        "title":      title.strip(),
-        "date":       date,
-        "start_time": (start_time or "").strip() or None,
-        "end_time":   (end_time   or "").strip() or None,
-        "description": (desc     or "").strip() or None,
-        "location":   (location  or "").strip() or None,
+        "title":       title.strip(),
+        "date":        date,
+        "start_time":  start_time,
+        "end_time":    end_time,
+        "description": (desc or "").strip() or None,
     }
     ok, result = create_calendar_event(event_data, calendar_id=cal_id or "primary")
     if ok:
         return (
             dbc.Alert("🎉 Event added to Google Calendar! Refresh My Day to see it.", color="success"),
-            "", "", "", None, "", "",  # clear all fields
+            "", "", None, "", "",  # clear all fields
         )
     else:
         tip = ""
         if "insufficientPermissions" in result or "forbidden" in result.lower():
-            tip = " (Try selecting Primary Calendar instead)"
+            tip = " — Try selecting Primary Calendar instead."
         return (
             dbc.Alert(f"❌ Failed: {result}{tip}", color="danger"),
-            no_update, no_update, no_update, no_update, no_update, no_update,
+            no_update, no_update, no_update, no_update, no_update,
         )
 
 
