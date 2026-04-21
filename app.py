@@ -377,8 +377,8 @@ def extract_events_from_image(b64_data: str, mime_type: str) -> list:
         return []
 
 
-def create_calendar_event(event_data: dict) -> tuple[bool, str]:
-    """Create a single event in the user's primary Google Calendar."""
+def create_calendar_event(event_data: dict, calendar_id: str = "primary") -> tuple[bool, str]:
+    """Create a single event in the specified Google Calendar (default: primary)."""
     if not GOOGLE_AVAILABLE or not os.path.exists(TOKEN_FILE):
         return False, "Google Calendar not connected."
     try:
@@ -408,7 +408,8 @@ def create_calendar_event(event_data: dict) -> tuple[bool, str]:
         if event_data.get("description"):
             body["description"] = event_data["description"]
 
-        result = service.events().insert(calendarId="primary", body=body).execute()
+        cal_id = calendar_id if calendar_id else "primary"
+        result = service.events().insert(calendarId=cal_id, body=body).execute()
         return True, result.get("htmlLink", "")
     except Exception as e:
         err = str(e)
@@ -2326,11 +2327,8 @@ def cb_process_upload(contents, filename, selected_topic):
             "padding":"12px","marginBottom":"10px",
             "border":"1px solid #e2e8f0",
         }, children=[
-            # Title
             html.Strong(ev.get("title","Untitled"),
                         style={"color":"#1e293b","fontSize":"14px","display":"block","marginBottom":"8px"}),
-
-            # Destination toggle: Calendar or Task
             html.Div(className="d-flex align-items-center gap-2 mb-2", children=[
                 html.Span("Add as:", style={"fontSize":"12px","color":"#64748b","whiteSpace":"nowrap"}),
                 dbc.RadioItems(
@@ -2345,15 +2343,11 @@ def cb_process_upload(contents, filename, selected_topic):
                     labelStyle={"fontSize":"12px","marginRight":"12px","cursor":"pointer"},
                 ),
             ]),
-
-            # Date + time row
             html.Div(className="d-flex gap-2 flex-wrap align-items-center", children=[
                 html.Span("📆", style={"fontSize":"13px"}),
                 dcc.Input(
                     id={"type":"event-date","index":i},
-                    type="text",
-                    value=ev.get("date",""),
-                    placeholder="YYYY-MM-DD",
+                    type="text", value=ev.get("date",""), placeholder="YYYY-MM-DD",
                     debounce=True,
                     style={"width":"130px","fontSize":"12px","padding":"3px 6px",
                            "border":"1px solid #cbd5e1","borderRadius":"6px"},
@@ -2361,9 +2355,7 @@ def cb_process_upload(contents, filename, selected_topic):
                 html.Span("🕐", style={"fontSize":"13px"}),
                 dcc.Input(
                     id={"type":"event-start","index":i},
-                    type="text",
-                    value=ev.get("start_time",""),
-                    placeholder="Start HH:MM",
+                    type="text", value=ev.get("start_time",""), placeholder="Start HH:MM",
                     debounce=True,
                     style={"width":"100px","fontSize":"12px","padding":"3px 6px",
                            "border":"1px solid #cbd5e1","borderRadius":"6px"},
@@ -2371,18 +2363,13 @@ def cb_process_upload(contents, filename, selected_topic):
                 html.Span("–", style={"color":"#94a3b8"}),
                 dcc.Input(
                     id={"type":"event-end","index":i},
-                    type="text",
-                    value=ev.get("end_time",""),
-                    placeholder="End HH:MM",
+                    type="text", value=ev.get("end_time",""), placeholder="End HH:MM",
                     debounce=True,
                     style={"width":"100px","fontSize":"12px","padding":"3px 6px",
                            "border":"1px solid #cbd5e1","borderRadius":"6px"},
                 ),
-                html.Span("(leave time blank = All day)",
-                          style={"fontSize":"11px","color":"#94a3b8"}),
+                html.Span("(blank = All day)", style={"fontSize":"11px","color":"#94a3b8"}),
             ]),
-
-            # Description
             html.P(ev.get("description",""),
                    style={"color":"#64748b","fontSize":"11px","margin":"6px 0 0"})
             if ev.get("description") else html.Div(),
@@ -2418,57 +2405,56 @@ def cb_process_upload(contents, filename, selected_topic):
     State({"type":"event-start", "index": dash.ALL}, "value"),
     State({"type":"event-end",   "index": dash.ALL}, "value"),
     State("task-store",             "data"),
+    State("planner-topic-dropdown", "value"),
     prevent_initial_call=True,
 )
-def cb_add_all_events(n, events, dests, dates, starts, ends, tasks):
+def cb_add_all_events(n, events, dests, dates, starts, ends, tasks, selected_cal_id):
     if not n or not events:
         return no_update, no_update
 
     tasks = tasks or []
     next_id = max((t["id"] for t in tasks), default=-1) + 1
+    cal_id = selected_cal_id or "primary"
 
     cal_success, cal_failed, task_added = 0, 0, 0
 
     for i, ev in enumerate(events):
-        # Read edited values (fall back to original if list is shorter)
         dest       = dests[i]  if i < len(dests)  else "calendar"
         edit_date  = dates[i]  if i < len(dates)  else ev.get("date","")
         edit_start = starts[i] if i < len(starts) else ev.get("start_time","")
         edit_end   = ends[i]   if i < len(ends)   else ev.get("end_time","")
 
-        # Build merged event dict with user edits
         merged = {**ev,
                   "date":       (edit_date  or "").strip() or ev.get("date",""),
                   "start_time": (edit_start or "").strip() or None,
                   "end_time":   (edit_end   or "").strip() or None}
 
         if dest == "task":
-            # Add to task store
-            due_str = merged.get("date") or None
             tasks.append({
                 "id":       next_id,
                 "text":     merged.get("title","Imported Task"),
                 "category": "assignment",
                 "done":     False,
-                "due":      due_str,
+                "due":      merged.get("date") or None,
             })
             next_id += 1
             task_added += 1
         else:
-            ok, _ = create_calendar_event(merged)
+            ok, _ = create_calendar_event(merged, calendar_id=cal_id)
             if ok:
                 cal_success += 1
             else:
                 cal_failed += 1
 
-    # Build summary message
+    # Build human-readable calendar name for the summary
+    cal_label = "Primary Calendar" if cal_id == "primary" else cal_id.split("@")[0]
     parts = []
     if cal_success:
-        parts.append(f"📅 {cal_success} event{'s' if cal_success>1 else ''} added to Google Calendar")
+        parts.append(f"📅 {cal_success} event{'s' if cal_success>1 else ''} → {cal_label}")
     if task_added:
-        parts.append(f"✅ {task_added} task{'s' if task_added>1 else ''} added to My Tasks")
+        parts.append(f"✅ {task_added} task{'s' if task_added>1 else ''} → My Tasks")
     if cal_failed:
-        parts.append(f"❌ {cal_failed} calendar event{'s' if cal_failed>1 else ''} failed")
+        parts.append(f"❌ {cal_failed} calendar item{'s' if cal_failed>1 else ''} failed")
 
     if not parts:
         return dbc.Alert("Nothing was added.", color="warning"), tasks
