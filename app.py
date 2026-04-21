@@ -103,7 +103,7 @@ def load_tool_usage() -> dict:
         except Exception:
             pass
     return {"get_weather": 0, "get_news": 0, "get_calendar_events": 0,
-            "create_calendar_event": 0, "add_task": 0}
+            "create_calendar_event": 0, "add_task": 0, "delete_calendar_event": 0}
 
 
 def track_tool_call(tool_name: str):
@@ -450,6 +450,59 @@ def create_calendar_event(event_data: dict, calendar_id: str = "primary") -> tup
         return False, err
 
 
+def find_calendar_id_by_name(name: str) -> str:
+    """Look up a calendar's ID by partial name match. Returns 'primary' if not found."""
+    if not name or not GOOGLE_AVAILABLE or not os.path.exists(TOKEN_FILE):
+        return "primary"
+    try:
+        creds    = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        service  = gapi_build("calendar", "v3", credentials=creds)
+        cal_list = service.calendarList().list().execute()
+        name_lower = name.lower()
+        for c in cal_list.get("items", []):
+            if name_lower in c.get("summary", "").lower():
+                return c["id"]
+    except Exception:
+        pass
+    return "primary"
+
+
+def delete_calendar_event_by_title(title: str, date: str) -> tuple[bool, str]:
+    """Find and delete a calendar event by title and date."""
+    if not GOOGLE_AVAILABLE or not os.path.exists(TOKEN_FILE):
+        return False, "Google Calendar not connected."
+    try:
+        import pytz
+        creds   = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        service = gapi_build("calendar", "v3", credentials=creds)
+
+        local_tz = pytz.timezone("Europe/Madrid")
+        day  = datetime.fromisoformat(date)
+        tmin = local_tz.localize(day.replace(hour=0,  minute=0,  second=0)).isoformat()
+        tmax = local_tz.localize(day.replace(hour=23, minute=59, second=59)).isoformat()
+
+        # Search across all calendars
+        cal_list = service.calendarList().list().execute()
+        title_lower = title.lower()
+        deleted = []
+        for cal in cal_list.get("items", []):
+            cal_id = cal["id"]
+            events = service.events().list(
+                calendarId=cal_id, timeMin=tmin, timeMax=tmax,
+                singleEvents=True, orderBy="startTime"
+            ).execute()
+            for ev in events.get("items", []):
+                if title_lower in ev.get("summary", "").lower():
+                    service.events().delete(calendarId=cal_id, eventId=ev["id"]).execute()
+                    deleted.append(ev.get("summary", title))
+
+        if deleted:
+            return True, f"Deleted: {', '.join(deleted)}"
+        return False, f"No event matching '{title}' found on {date}."
+    except Exception as e:
+        return False, str(e)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # LLM — SYSTEM PROMPT + TOOL CALLING
 # ─────────────────────────────────────────────────────────────────────────────
@@ -531,16 +584,38 @@ LLM_TOOLS = [
             "description": (
                 "Create a new event in the user's Google Calendar. "
                 "Use this when the user asks to add, schedule, or create a meeting/event/appointment. "
-                "Resolve relative dates like 'tomorrow', 'next Monday', 'this Friday' to YYYY-MM-DD based on today's date."
+                "Resolve relative dates like 'tomorrow', 'next Monday', 'this Friday' to YYYY-MM-DD based on today's date. "
+                "If the user specifies a calendar name (e.g. 'Deltalab calendar', 'N'eng life'), pass it as calendar_name."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title":      {"type":"string", "description":"Event title"},
-                    "date":       {"type":"string", "description":"Date in YYYY-MM-DD format"},
-                    "start_time": {"type":"string", "description":"Start time HH:MM (24h), omit for all-day"},
-                    "end_time":   {"type":"string", "description":"End time HH:MM (24h), omit for all-day"},
-                    "description":{"type":"string", "description":"Optional description"},
+                    "title":         {"type":"string", "description":"Event title"},
+                    "date":          {"type":"string", "description":"Date in YYYY-MM-DD format"},
+                    "start_time":    {"type":"string", "description":"Start time HH:MM (24h), omit for all-day"},
+                    "end_time":      {"type":"string", "description":"End time HH:MM (24h), omit for all-day"},
+                    "description":   {"type":"string", "description":"Optional description or meeting link"},
+                    "location":      {"type":"string", "description":"Optional location"},
+                    "calendar_name": {"type":"string", "description":"Name of the calendar to add to (e.g. 'Deltalab'). Leave empty for primary."},
+                },
+                "required": ["title", "date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_calendar_event",
+            "description": (
+                "Delete a calendar event by its title and date. "
+                "Use this when the user asks to remove, cancel, or delete a meeting/event. "
+                "Always call get_calendar_events first to confirm the event exists before deleting."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type":"string", "description":"Title or partial title of the event to delete"},
+                    "date":  {"type":"string", "description":"Date of the event in YYYY-MM-DD format"},
                 },
                 "required": ["title", "date"],
             },
@@ -588,17 +663,28 @@ def _run_tool(name: str, args: dict, city: str, topics: list) -> tuple[str, dict
         return json.dumps({"date": d, "events": get_calendar_events(d)}), None
 
     if name == "create_calendar_event":
+        # Resolve calendar name to ID if provided
+        cal_name = args.get("calendar_name", "")
+        cal_id   = find_calendar_id_by_name(cal_name) if cal_name else "primary"
         event_data = {
             "title":       args.get("title", "New Event"),
             "date":        args.get("date",  datetime.now().strftime("%Y-%m-%d")),
             "start_time":  args.get("start_time") or None,
             "end_time":    args.get("end_time")   or None,
             "description": args.get("description") or None,
+            "location":    args.get("location")    or None,
         }
-        ok, result = create_calendar_event(event_data)
+        ok, result = create_calendar_event(event_data, calendar_id=cal_id)
         if ok:
-            return json.dumps({"success": True, "message": f"Event '{event_data['title']}' created on {event_data['date']}"}), None
+            cal_label = cal_name if cal_name else "Primary Calendar"
+            return json.dumps({"success": True, "message": f"Event '{event_data['title']}' created on {event_data['date']} in {cal_label}."}), None
         return json.dumps({"success": False, "error": result}), None
+
+    if name == "delete_calendar_event":
+        ok, result = delete_calendar_event_by_title(
+            args.get("title", ""), args.get("date", datetime.now().strftime("%Y-%m-%d"))
+        )
+        return json.dumps({"success": ok, "message": result}), None
 
     if name == "add_task":
         task = {
@@ -1856,11 +1942,12 @@ def cb_tool_usage(n):
         return html.P("No tool calls yet — start chatting with the AI! 🤖",
                       style={"color":"#94a3b8","fontSize":"12px"})
     labels = {
-        "get_calendar_events":  "📅 Check Calendar",
-        "get_weather":          "🌤️ Get Weather",
-        "get_news":             "📰 Fetch News",
-        "create_calendar_event":"➕ Create Event",
-        "add_task":             "✅ Add Task",
+        "get_calendar_events":   "📅 Check Calendar",
+        "get_weather":           "🌤️ Get Weather",
+        "get_news":              "📰 Fetch News",
+        "create_calendar_event": "➕ Create Event",
+        "add_task":              "✅ Add Task",
+        "delete_calendar_event": "🗑️ Delete Event",
     }
     rows = []
     for key, label in labels.items():
