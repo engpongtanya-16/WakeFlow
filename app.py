@@ -443,6 +443,8 @@ def create_calendar_event(event_data: dict, calendar_id: str = "primary") -> tup
             body["location"] = event_data["location"]
         if event_data.get("description"):
             body["description"] = event_data["description"]
+        if event_data.get("colorId"):
+            body["colorId"] = str(event_data["colorId"])
 
         cal_id = calendar_id if calendar_id else "primary"
         result = service.events().insert(calendarId=cal_id, body=body).execute()
@@ -822,22 +824,18 @@ def _run_tool(name: str, args: dict, city: str, topics: list) -> tuple[str, dict
         return json.dumps({"date": d, "events": get_calendar_events(d)}), None
 
     if name == "create_calendar_event":
-        # Resolve calendar name to ID if provided
-        cal_name = args.get("calendar_name", "")
-        cal_id   = find_calendar_id_by_name(cal_name) if cal_name else "primary"
+        # Don't execute yet — return pending event for UI calendar picker
         event_data = {
-            "title":       args.get("title", "New Event"),
-            "date":        args.get("date",  datetime.now().strftime("%Y-%m-%d")),
-            "start_time":  args.get("start_time") or None,
-            "end_time":    args.get("end_time")   or None,
-            "description": args.get("description") or None,
-            "location":    args.get("location")    or None,
+            "title":        args.get("title", "New Event"),
+            "date":         args.get("date",  datetime.now().strftime("%Y-%m-%d")),
+            "start_time":   args.get("start_time") or None,
+            "end_time":     args.get("end_time")   or None,
+            "description":  args.get("description") or None,
+            "location":     args.get("location")    or None,
+            "calendar_name":args.get("calendar_name", ""),
         }
-        ok, result = create_calendar_event(event_data, calendar_id=cal_id)
-        if ok:
-            cal_label = cal_name if cal_name else "Primary Calendar"
-            return json.dumps({"success": True, "message": f"Event '{event_data['title']}' created on {event_data['date']} in {cal_label}."}), None
-        return json.dumps({"success": False, "error": result}), None
+        pending = {"type": "event", "data": event_data}
+        return json.dumps({"success": True, "message": f"Event '{event_data['title']}' is ready to be added. I'll ask the user to choose the target calendar."}), pending
 
     if name == "delete_calendar_event":
         ok, result = delete_calendar_event_by_title(
@@ -882,7 +880,8 @@ def chat_with_tools(history: list, city: str, topics: list) -> tuple[str, list]:
     from openai import OpenAI
     client   = OpenAI(api_key=OPENAI_API_KEY)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history]
-    pending_tasks = []
+    pending_tasks  = []
+    pending_event  = None  # Only one pending create_calendar_event at a time
 
     try:
         resp = client.chat.completions.create(
@@ -900,6 +899,8 @@ def chat_with_tools(history: list, city: str, topics: list) -> tuple[str, list]:
                 result, extra = _run_tool(tc.function.name, args, city, topics)
                 if extra and tc.function.name == "add_task":
                     pending_tasks.append(extra)
+                elif extra and tc.function.name == "create_calendar_event":
+                    pending_event = extra["data"]
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             resp = client.chat.completions.create(
                 model="gpt-4o-mini", messages=messages,
@@ -907,9 +908,9 @@ def chat_with_tools(history: list, city: str, topics: list) -> tuple[str, list]:
             )
             msg = resp.choices[0].message
 
-        return msg.content or "Sorry, no response.", pending_tasks
+        return msg.content or "Sorry, no response.", pending_tasks, pending_event
     except Exception as e:
-        return f"AI error: {e}", []
+        return f"AI error: {e}", [], None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1591,6 +1592,30 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
     dcc.Store(id="email-settings",         data={}),
     dcc.Store(id="extracted-events-store", data=[]),
     dcc.Store(id="deleted-event-indices",  data=[]),
+    dcc.Store(id="pending-event-store",    data=None),  # AI-created event waiting for calendar pick
+
+    # ── Calendar Picker Modal (for AI create event) ───────────────────────
+    dbc.Modal(id="calendar-picker-modal", is_open=False, centered=True, children=[
+        dbc.ModalHeader(dbc.ModalTitle("📅 Choose Target Calendar")),
+        dbc.ModalBody([
+            html.P("Which calendar should this event be added to?",
+                   style={"color":"#64748b","fontSize":"13px","marginBottom":"12px"}),
+            html.Div(id="calendar-picker-event-preview", className="mb-3"),
+            dcc.Dropdown(
+                id="calendar-picker-dropdown",
+                options=[{"label":"📅 Primary Calendar","value":"primary"}],
+                value="primary",
+                clearable=False,
+                style={"fontSize":"13px"},
+            ),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("✕ Cancel", id="calendar-picker-cancel",
+                       color="secondary", size="sm", n_clicks=0),
+            dbc.Button("➕ Add Event", id="calendar-picker-confirm",
+                       color="success", size="sm", n_clicks=0),
+        ]),
+    ]),
 
     # Header
     dbc.Row(className="wf-header align-items-center py-3 mb-2", children=[
@@ -2415,10 +2440,13 @@ def cb_show_map(n, loc_data):
 
 
 @callback(
-    Output("chat-window",  "children"),
-    Output("chat-store",   "data"),
-    Output("chat-input",   "value"),
-    Output("task-store",   "data", allow_duplicate=True),
+    Output("chat-window",                   "children"),
+    Output("chat-store",                    "data"),
+    Output("chat-input",                    "value"),
+    Output("task-store",                    "data", allow_duplicate=True),
+    Output("pending-event-store",           "data"),
+    Output("calendar-picker-modal",         "is_open"),
+    Output("calendar-picker-event-preview", "children"),
     Input("send-btn",      "n_clicks"),
     Input("chat-input",    "n_submit"),
     State("chat-input",    "value"),
@@ -2431,7 +2459,7 @@ def cb_show_map(n, loc_data):
 def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
     user_text = user_text or ""
     if not user_text.strip():
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
     city    = city    or "Barcelona"
     topics  = topics  or ["Tech","Finance"]
@@ -2451,19 +2479,14 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
     enriched  = f"[TODAY: {today_tag}] [CITY: {city}] [TOPICS: {', '.join(topics)}] {user_text}"
     history.append({"role": "user", "content": enriched})
 
-    reply, pending_tasks = chat_with_tools(history, city, topics)
+    reply, pending_tasks, pending_event = chat_with_tools(history, city, topics)
     history.append({"role": "assistant", "content": reply})
 
-    # Add any tasks the AI created to the task store
     next_id = max((t["id"] for t in tasks), default=-1) + 1
     for pt in pending_tasks:
-        tasks.append({
-            "id":       next_id,
-            "text":     pt["text"],
-            "category": pt.get("category", "todo"),
-            "done":     False,
-            "due":      pt.get("due_date") or None,
-        })
+        tasks.append({"id": next_id, "text": pt["text"],
+                      "category": pt.get("category","todo"), "done": False,
+                      "due": pt.get("due_date") or None})
         next_id += 1
 
     for m in history:
@@ -2473,10 +2496,85 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
         elif m["role"] == "assistant":
             bubbles.append(_bubble_ai(m["content"]))
 
-    return bubbles, history, "", tasks
+    if pending_event:
+        ev = pending_event
+        time_str = (f"{ev.get('start_time','')} – {ev.get('end_time','')}"
+                    if ev.get("start_time") else "All day")
+        preview = html.Div([
+            html.Strong(ev.get("title",""), style={"color":"#1e293b","fontSize":"14px","display":"block"}),
+            html.Div(className="d-flex gap-2 mt-1 flex-wrap", children=[
+                dbc.Badge(ev.get("date",""), color="primary"),
+                dbc.Badge(time_str, color="secondary"),
+            ]),
+            html.P(ev.get("description",""),
+                   style={"color":"#64748b","fontSize":"12px","margin":"6px 0 0"})
+            if ev.get("description") else html.Div(),
+        ], style={"background":"#f8fafc","borderRadius":"8px","padding":"10px"})
+        return bubbles, history, "", tasks, pending_event, True, preview
+
+    return bubbles, history, "", tasks, None, False, no_update
 
 
-# ── Manual Add Event to Google Calendar ───────────────────────────────────────
+# ── Calendar Picker Modal Callbacks ───────────────────────────────────────────
+
+@callback(
+    Output("calendar-picker-dropdown", "options"),
+    Input("calendar-picker-modal", "is_open"),
+)
+def cb_load_picker_calendars(is_open):
+    default = [{"label":"📅 Primary Calendar","value":"primary"}]
+    if not is_open or not (GOOGLE_AVAILABLE and os.path.exists(TOKEN_FILE)):
+        return default
+    try:
+        creds    = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        service  = gapi_build("calendar","v3",credentials=creds)
+        cal_list = service.calendarList().list().execute()
+        opts = [{"label": f"🗓️ {c['summary']}", "value": c["id"]}
+                for c in cal_list.get("items",[]) if c.get("summary")]
+        return opts if opts else default
+    except Exception:
+        return default
+
+
+@callback(
+    Output("calendar-picker-modal",  "is_open", allow_duplicate=True),
+    Output("chat-window",            "children", allow_duplicate=True),
+    Input("calendar-picker-confirm", "n_clicks"),
+    Input("calendar-picker-cancel",  "n_clicks"),
+    State("pending-event-store",     "data"),
+    State("calendar-picker-dropdown","value"),
+    State("chat-store",              "data"),
+    prevent_initial_call=True,
+)
+def cb_calendar_picker_action(confirm_clicks, cancel_clicks, pending_event, cal_id, history):
+    triggered = ctx.triggered_id
+    if triggered == "calendar-picker-cancel" or not pending_event:
+        return False, no_update
+
+    # User confirmed — create the event
+    cal_id = cal_id or "primary"
+    ok, result = create_calendar_event(pending_event, calendar_id=cal_id)
+
+    # Rebuild chat bubbles and add confirmation bubble
+    bubbles = [_bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
+                           "I'll check your calendar, weather, and news automatically.")]
+    for m in (history or []):
+        if m["role"] == "user":
+            display = m["content"].split("] ")[-1] if "] " in m["content"] else m["content"]
+            bubbles.append(_bubble_user(display))
+        elif m["role"] == "assistant":
+            bubbles.append(_bubble_ai(m["content"]))
+
+    if ok:
+        ev = pending_event
+        bubbles.append(_bubble_ai(
+            f"✅ '{ev.get('title')}' added to your calendar on {ev.get('date')}! "
+            "Refresh My Day to see it. 📅"
+        ))
+    else:
+        bubbles.append(_bubble_ai(f"❌ Could not add event: {result}"))
+
+    return False, bubbles
 def _normalize_time(t: str) -> str | None:
     """Convert various time formats (16.35, 1635, 16:35) → '16:35', or None if blank."""
     if not t:
@@ -3091,6 +3189,31 @@ def cb_process_upload(contents, filename, selected_topic, cal_options):
                     ),
                     html.Span("(blank = All day)", style={"fontSize":"11px","color":"#94a3b8"}),
                 ]),
+                # Color picker
+                html.Div(className="d-flex align-items-center gap-2 mt-2", children=[
+                    html.Span("🎨", style={"fontSize":"13px"}),
+                    html.Span("Color:", style={"fontSize":"12px","color":"#64748b"}),
+                    dcc.Dropdown(
+                        id={"type":"event-color","index":i},
+                        options=[
+                            {"label":"⬜ Calendar default", "value":""},
+                            {"label":"🍅 Tomato",          "value":"11"},
+                            {"label":"🌸 Flamingo",        "value":"4"},
+                            {"label":"🍊 Tangerine",       "value":"6"},
+                            {"label":"🍌 Banana",          "value":"5"},
+                            {"label":"🌿 Sage",            "value":"2"},
+                            {"label":"🌲 Basil",           "value":"10"},
+                            {"label":"🫐 Peacock",         "value":"7"},
+                            {"label":"🫐 Blueberry",       "value":"9"},
+                            {"label":"💜 Lavender",        "value":"1"},
+                            {"label":"🍇 Grape",           "value":"3"},
+                            {"label":"🩶 Graphite",        "value":"8"},
+                        ],
+                        value="",
+                        clearable=False,
+                        style={"fontSize":"12px","width":"180px"},
+                    ),
+                ]),
                 html.P(ev.get("description",""),
                        style={"color":"#64748b","fontSize":"11px","margin":"6px 0 0"})
                 if ev.get("description") else html.Div(),
@@ -3161,12 +3284,13 @@ def cb_update_add_btn_label(deleted, events):
     State({"type":"event-date",  "index": dash.ALL}, "value"),
     State({"type":"event-start", "index": dash.ALL}, "value"),
     State({"type":"event-end",   "index": dash.ALL}, "value"),
+    State({"type":"event-color", "index": dash.ALL}, "value"),
     State("deleted-event-indices",  "data"),
     State("task-store",             "data"),
     State("planner-topic-dropdown", "value"),
     prevent_initial_call=True,
 )
-def cb_add_all_events(n, events, dests, dates, starts, ends, deleted_indices, tasks, selected_cal_id):
+def cb_add_all_events(n, events, dests, dates, starts, ends, colors_list, deleted_indices, tasks, selected_cal_id):
     if not n or not events:
         return no_update, no_update
 
@@ -3179,19 +3303,20 @@ def cb_add_all_events(n, events, dests, dates, starts, ends, deleted_indices, ta
     error_msgs = []
 
     for i, ev in enumerate(events):
-        # Skip cards the user deleted
         if i in deleted_set:
             continue
 
-        dest       = dests[i]  if i < len(dests)  else "calendar"
-        edit_date  = dates[i]  if i < len(dates)  else ev.get("date","")
-        edit_start = starts[i] if i < len(starts) else ev.get("start_time","")
-        edit_end   = ends[i]   if i < len(ends)   else ev.get("end_time","")
+        dest       = dests[i]       if i < len(dests)        else "calendar"
+        edit_date  = dates[i]       if i < len(dates)        else ev.get("date","")
+        edit_start = starts[i]      if i < len(starts)       else ev.get("start_time","")
+        edit_end   = ends[i]        if i < len(ends)         else ev.get("end_time","")
+        color_id   = colors_list[i] if i < len(colors_list)  else ""
 
         merged = {**ev,
                   "date":       (edit_date  or "").strip() or ev.get("date",""),
                   "start_time": (edit_start or "").strip() or None,
-                  "end_time":   (edit_end   or "").strip() or None}
+                  "end_time":   (edit_end   or "").strip() or None,
+                  "colorId":    color_id or None}
 
         if dest == "task":
             tasks.append({
