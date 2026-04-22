@@ -454,6 +454,54 @@ def create_calendar_event(event_data: dict, calendar_id: str = "primary") -> tup
         return False, err
 
 
+def move_event_to_calendar(title: str, date: str, target_calendar_name: str) -> tuple[bool, str]:
+    """Move an event from its current calendar to a different calendar by name."""
+    if not GOOGLE_AVAILABLE or not os.path.exists(TOKEN_FILE):
+        return False, "Google Calendar not connected."
+    try:
+        import pytz
+        creds   = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        service = gapi_build("calendar", "v3", credentials=creds)
+
+        # Find destination calendar ID
+        dest_cal_id = find_calendar_id_by_name(target_calendar_name)
+        if dest_cal_id == "primary" and target_calendar_name.lower() not in ("primary", ""):
+            return False, f"Calendar '{target_calendar_name}' not found."
+
+        local_tz = pytz.timezone("Europe/Madrid")
+        day  = datetime.fromisoformat(date)
+        tmin = local_tz.localize(day.replace(hour=0,  minute=0,  second=0)).isoformat()
+        tmax = local_tz.localize(day.replace(hour=23, minute=59, second=59)).isoformat()
+
+        query_tokens = set(title.lower().split()) - {"the","a","an","with","for","at","on","in","of"}
+        cal_list = service.calendarList().list().execute()
+        moved = []
+
+        for cal in cal_list.get("items", []):
+            src_cal_id = cal["id"]
+            if src_cal_id == dest_cal_id:
+                continue
+            events = service.events().list(
+                calendarId=src_cal_id, timeMin=tmin, timeMax=tmax,
+                singleEvents=True, orderBy="startTime"
+            ).execute()
+            for ev in events.get("items", []):
+                ev_tokens = set(ev.get("summary","").lower().split()) - {"the","a","an","with","for","at","on","in","of"}
+                if query_tokens & ev_tokens:
+                    service.events().move(
+                        calendarId=src_cal_id,
+                        eventId=ev["id"],
+                        destination=dest_cal_id
+                    ).execute()
+                    moved.append(ev.get("summary", title))
+
+        if moved:
+            return True, f"Moved '{', '.join(moved)}' to '{target_calendar_name}' calendar."
+        return False, f"No event matching '{title}' found on {date}."
+    except Exception as e:
+        return False, str(e)
+
+
 def update_calendar_event_by_title(title: str, date: str, meeting_link: str = "",
                                     location: str = "", description: str = "") -> tuple[bool, str]:
     """Find an event and update its meeting link, location, or description."""
@@ -714,6 +762,27 @@ LLM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "move_calendar_event",
+            "description": (
+                "Move an existing event to a different calendar. "
+                "Use this when the user says 'move this event to X calendar', "
+                "'fix this to be in X calendar', or 'put this in X calendar'. "
+                "Always call get_calendar_events first to get the exact event title."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title":               {"type":"string", "description":"Exact or partial event title"},
+                    "date":                {"type":"string", "description":"Date YYYY-MM-DD"},
+                    "target_calendar_name":{"type":"string", "description":"Name of the destination calendar (e.g. Deltalab, N'eng life)"},
+                },
+                "required": ["title", "date", "target_calendar_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "add_task",
             "description": (
                 "Add a task or to-do item to the user's My Tasks list. "
@@ -783,6 +852,14 @@ def _run_tool(name: str, args: dict, city: str, topics: list) -> tuple[str, dict
             meeting_link=args.get("meeting_link", ""),
             location=args.get("location", ""),
             description=args.get("description", ""),
+        )
+        return json.dumps({"success": ok, "message": result}), None
+
+    if name == "move_calendar_event":
+        ok, result = move_event_to_calendar(
+            title=args.get("title", ""),
+            date=args.get("date", datetime.now().strftime("%Y-%m-%d")),
+            target_calendar_name=args.get("target_calendar_name", "primary"),
         )
         return json.dumps({"success": ok, "message": result}), None
 
