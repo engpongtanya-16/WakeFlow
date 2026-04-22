@@ -526,11 +526,14 @@ def move_event_to_calendar(title: str, date: str, target_calendar_name: str) -> 
 
 
 def update_calendar_event_by_title(title: str, date: str, meeting_link: str = "",
-                                    location: str = "", description: str = "") -> tuple[bool, str]:
-    """Find an event and update its meeting link, location, or description."""
+                                    location: str = "", description: str = "",
+                                    new_start_time: str = "", new_end_time: str = "",
+                                    new_date: str = "") -> tuple[bool, str]:
+    """Find an event and update its time, meeting link, location, or description."""
     if not GOOGLE_AVAILABLE or not os.path.exists(TOKEN_FILE):
         return False, "Google Calendar not connected."
     try:
+        from datetime import timedelta
         import pytz
         creds   = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
         service = gapi_build("calendar", "v3", credentials=creds)
@@ -554,6 +557,23 @@ def update_calendar_event_by_title(title: str, date: str, meeting_link: str = ""
                 ev_tokens = set(ev.get("summary","").lower().split()) - {"the","a","an","with","for","at","on","in","of"}
                 if query_tokens & ev_tokens:
                     patch = {}
+                    # Reschedule time
+                    target_date = (new_date or date).strip()
+                    if new_start_time:
+                        start_str = new_start_time.strip().replace(".", ":").replace(",", ":")
+                        patch["start"] = {"dateTime": f"{target_date}T{start_str}:00", "timeZone": "Europe/Madrid"}
+                        if new_end_time:
+                            end_str = new_end_time.strip().replace(".", ":").replace(",", ":")
+                            patch["end"] = {"dateTime": f"{target_date}T{end_str}:00", "timeZone": "Europe/Madrid"}
+                        else:
+                            # Default 1 hour later
+                            st = datetime.strptime(f"{target_date}T{start_str}", "%Y-%m-%dT%H:%M")
+                            et = st + timedelta(hours=1)
+                            patch["end"] = {"dateTime": et.strftime("%Y-%m-%dT%H:%M:00"), "timeZone": "Europe/Madrid"}
+                    elif new_date:
+                        next_day = (datetime.strptime(new_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+                        patch["start"] = {"date": new_date}
+                        patch["end"]   = {"date": next_day}
                     if location:
                         patch["location"] = location
                     if description or meeting_link:
@@ -657,7 +677,9 @@ Rules:
 - Call get_news before summarising headlines
 - Keep replies under 120 words unless the user asks for more
 - Use bullet points for 3+ items
-- BEFORE deleting any event: ALWAYS call get_calendar_events first to get the EXACT event title, then use that exact title in delete_calendar_event. Never guess the title.
+- BEFORE any event operation (delete, update, move, reschedule, change time): ALWAYS call get_calendar_events FIRST for the relevant date to get the EXACT event title as it appears in the calendar. Then use that exact title. NEVER claim an event doesn't exist without calling get_calendar_events first.
+- When the user mentions an event by a rough name (e.g. "Louvre Museum", "meeting", "picnic"), call get_calendar_events for that date and find the closest matching event — do NOT say "event not found" without fetching first.
+- If user asks to reschedule or change time of an event: call get_calendar_events to confirm the event exists, then use update_calendar_event to patch it, or delete_calendar_event + create_calendar_event if needed.
 
 IMPORTANT — DATE CALCULATION:
 Each message starts with [TODAY: WEEKDAY YYYY-MM-DD]. Use this as your anchor.
@@ -764,19 +786,22 @@ LLM_TOOLS = [
         "function": {
             "name": "update_calendar_event",
             "description": (
-                "Update an existing calendar event — add a meeting link, change location, or update description. "
-                "Use this when the user wants to ADD a Zoom/Meet/Teams link to an existing event, "
+                "Update an existing calendar event — reschedule time, add a meeting link, change location, or update description. "
+                "Use this when the user wants to CHANGE the time of an event, ADD a Zoom/Meet/Teams link, "
                 "or update the location/description of an existing event. "
                 "Always call get_calendar_events first to get the exact event title."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title":        {"type":"string", "description":"Exact event title to find"},
-                    "date":         {"type":"string", "description":"Date YYYY-MM-DD"},
-                    "meeting_link": {"type":"string", "description":"Meeting URL to add (Zoom/Meet/Teams)"},
-                    "location":     {"type":"string", "description":"New location to set"},
-                    "description":  {"type":"string", "description":"New or additional description text"},
+                    "title":          {"type":"string", "description":"Exact event title to find"},
+                    "date":           {"type":"string", "description":"Current date of the event YYYY-MM-DD"},
+                    "new_start_time": {"type":"string", "description":"New start time HH:MM to reschedule to"},
+                    "new_end_time":   {"type":"string", "description":"New end time HH:MM"},
+                    "new_date":       {"type":"string", "description":"New date YYYY-MM-DD if moving to different day"},
+                    "meeting_link":   {"type":"string", "description":"Meeting URL to add (Zoom/Meet/Teams)"},
+                    "location":       {"type":"string", "description":"New location to set"},
+                    "description":    {"type":"string", "description":"New or additional description text"},
                 },
                 "required": ["title", "date"],
             },
@@ -871,6 +896,9 @@ def _run_tool(name: str, args: dict, city: str, topics: list) -> tuple[str, dict
             meeting_link=args.get("meeting_link", ""),
             location=args.get("location", ""),
             description=args.get("description", ""),
+            new_start_time=args.get("new_start_time", ""),
+            new_end_time=args.get("new_end_time", ""),
+            new_date=args.get("new_date", ""),
         )
         return json.dumps({"success": ok, "message": result}), None
 
