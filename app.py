@@ -3377,7 +3377,7 @@ def cb_process_upload(contents, filename, selected_topic, cal_options):
             ]
         ))
 
-    # Calendar target label (shown cleanly, not the raw ID)
+    # Calendar target label 
     cal_badge = dbc.Badge(f"📅 → {cal_name}", color="success", className="ms-1") \
                 if selected_topic else html.Span()
 
