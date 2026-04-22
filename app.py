@@ -29,7 +29,7 @@ OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "")
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")
 NEWS_API_KEY    = os.getenv("NEWS_API_KEY", "")
 
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(timezone="Europe/Madrid")
 scheduler.start()
 _scheduled_job = {"job": None}
 
