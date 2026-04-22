@@ -595,6 +595,22 @@ def update_calendar_event_by_title(title: str, date: str, meeting_link: str = ""
         return False, str(e)
 
 
+def _get_cal_options_cached() -> list:
+    """Return calendar list options for dropdowns. Falls back to primary if not connected."""
+    default = [{"label":"📅 Primary Calendar","value":"primary"}]
+    if not (GOOGLE_AVAILABLE and os.path.exists(TOKEN_FILE)):
+        return default
+    try:
+        creds    = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        service  = gapi_build("calendar","v3",credentials=creds)
+        cal_list = service.calendarList().list().execute()
+        opts = [{"label":f"🗓️ {c['summary']}","value":c["id"]}
+                for c in cal_list.get("items",[]) if c.get("summary")]
+        return opts if opts else default
+    except Exception:
+        return default
+
+
 def find_calendar_id_by_name(name: str) -> str:
     """Look up a calendar's ID by partial name match. Returns 'primary' if not found."""
     if not name or not GOOGLE_AVAILABLE or not os.path.exists(TOKEN_FILE):
@@ -1909,99 +1925,41 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                             ),
                         ]),
 
-                        dbc.Tabs(id="planner-mode-tabs", active_tab="tab-manual", children=[
+                        # Upload File content (no tabs, directly shown)
+                        html.Div(className="mt-2", children=[
+                            html.P("AI will extract events from your file — review before adding.",
+                                   style={"fontSize":"12px","color":"#64748b","marginBottom":"10px"}),
+                            dcc.Upload(
+                                id="planner-upload",
+                                children=html.Div([
+                                    html.Div("📂", style={"fontSize":"2rem","marginBottom":"6px"}),
+                                    html.Div("Drag & drop or click to upload",
+                                             style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
+                                    html.Div("PDF, PNG, JPG supported",
+                                             style={"fontSize":"11px","color":"#94a3b8","marginTop":"2px"}),
+                                ], style={"textAlign":"center","padding":"24px 16px"}),
+                                accept=".pdf,.png,.jpg,.jpeg",
+                                multiple=False,
+                                style={
+                                    "border":"2px dashed #cbd5e1","borderRadius":"12px",
+                                    "background":"rgba(249,250,251,0.8)","cursor":"pointer",
+                                },
+                            ),
+                            dcc.Loading(type="circle", color="#f97316",
+                                        children=html.Div(id="planner-result", className="mt-3")),
+                        ]),
 
-                            # ── Tab A: Add Manually ───────────────────────────
-                            dbc.Tab(tab_id="tab-manual", label="✏️ Add Event", children=[
-                                html.Div(className="mt-3", children=[
-                                    dbc.Input(
-                                        id="manual-event-title",
-                                        placeholder="Event title *",
-                                        type="text", size="sm", className="mb-2",
-                                        style={"fontSize":"13px"},
-                                    ),
-                                    dbc.Textarea(
-                                        id="manual-event-desc",
-                                        placeholder="Description (optional)",
-                                        size="sm", rows=2, className="mb-2",
-                                        style={"fontSize":"13px","resize":"none"},
-                                    ),
-                                    dbc.Input(
-                                        id="manual-event-location",
-                                        placeholder="📍 Location (optional) — e.g. BCN Airport",
-                                        type="text", size="sm", className="mb-2",
-                                        style={"fontSize":"13px"},
-                                    ),
-                                    dbc.Input(
-                                        id="manual-event-meeting-link",
-                                        placeholder="🔗 Meeting link (optional) — Zoom, Google Meet, Teams",
-                                        type="url", size="sm", className="mb-2",
-                                        style={"fontSize":"13px"},
-                                    ),
-                                    dbc.Row(className="g-2 mb-2", children=[
-                                        dbc.Col(width=5, children=[
-                                            html.Small("📆 Date", style={"color":"#64748b","fontSize":"11px"}),
-                                            dcc.DatePickerSingle(
-                                                id="manual-event-date",
-                                                placeholder="Date",
-                                                display_format="D MMM YYYY",
-                                                clearable=True,
-                                                style={"fontSize":"12px","width":"100%"},
-                                            ),
-                                        ]),
-                                        dbc.Col(width=3, children=[
-                                            html.Small("🕐 Start", style={"color":"#64748b","fontSize":"11px"}),
-                                            dbc.Input(
-                                                id="manual-event-start",
-                                                placeholder="HH:MM",
-                                                type="text", size="sm",
-                                                style={"fontSize":"12px"},
-                                            ),
-                                        ]),
-                                        dbc.Col(width=3, children=[
-                                            html.Small("🕑 End", style={"color":"#64748b","fontSize":"11px"}),
-                                            dbc.Input(
-                                                id="manual-event-end",
-                                                placeholder="HH:MM",
-                                                type="text", size="sm",
-                                                style={"fontSize":"12px"},
-                                            ),
-                                        ]),
-                                    ]),
-                                    html.Small("Leave time blank = All day event",
-                                               style={"color":"#94a3b8","fontSize":"11px","display":"block","marginBottom":"10px"}),
-                                    dbc.Button("➕ Add to Google Calendar",
-                                               id="manual-add-btn", color="success", size="sm",
-                                               n_clicks=0, className="w-100"),
-                                    html.Div(id="manual-add-status", className="mt-2"),
-                                ]),
-                            ]),
-
-                            # ── Tab B: Upload File ────────────────────────────
-                            dbc.Tab(tab_id="tab-upload", label="📎 Upload File", children=[
-                                html.Div(className="mt-3", children=[
-                                    html.P("AI will extract events from your file and let you review before adding.",
-                                           style={"fontSize":"12px","color":"#64748b","marginBottom":"10px"}),
-                                    dcc.Upload(
-                                        id="planner-upload",
-                                        children=html.Div([
-                                            html.Div("📂", style={"fontSize":"2rem","marginBottom":"6px"}),
-                                            html.Div("Drag & drop or click to upload",
-                                                     style={"fontWeight":"600","fontSize":"13px","color":"#1e293b"}),
-                                            html.Div("PDF, PNG, JPG supported",
-                                                     style={"fontSize":"11px","color":"#94a3b8","marginTop":"2px"}),
-                                        ], style={"textAlign":"center","padding":"24px 16px"}),
-                                        accept=".pdf,.png,.jpg,.jpeg",
-                                        multiple=False,
-                                        style={
-                                            "border":"2px dashed #cbd5e1","borderRadius":"12px",
-                                            "background":"rgba(249,250,251,0.8)","cursor":"pointer",
-                                        },
-                                    ),
-                                    dcc.Loading(type="circle", color="#f97316",
-                                                children=html.Div(id="planner-result", className="mt-3")),
-                                ]),
-                            ]),
+                        # Hidden inputs to keep manual-add callbacks from breaking
+                        html.Div(style={"display":"none"}, children=[
+                            dbc.Input(id="manual-event-title"),
+                            dbc.Textarea(id="manual-event-desc"),
+                            dbc.Input(id="manual-event-location"),
+                            dbc.Input(id="manual-event-meeting-link"),
+                            dcc.DatePickerSingle(id="manual-event-date"),
+                            dbc.Input(id="manual-event-start"),
+                            dbc.Input(id="manual-event-end"),
+                            dbc.Button(id="manual-add-btn", n_clicks=0),
+                            html.Div(id="manual-add-status"),
                         ]),
                     ]),
                 ]),
@@ -3400,29 +3358,17 @@ def cb_process_upload(contents, filename, selected_topic, cal_options):
                     ),
                     html.Span("(blank = All day)", style={"fontSize":"11px","color":"#94a3b8"}),
                 ]),
-                # Color picker
+                # Color picker → replaced by per-card calendar selector
                 html.Div(className="d-flex align-items-center gap-2 mt-2", children=[
-                    html.Span("🎨", style={"fontSize":"13px"}),
-                    html.Span("Color:", style={"fontSize":"12px","color":"#64748b"}),
+                    html.Span("🗓️", style={"fontSize":"13px"}),
+                    html.Span("Calendar:", style={"fontSize":"12px","color":"#64748b"}),
                     dcc.Dropdown(
-                        id={"type":"event-color","index":i},
-                        options=[
-                            {"label":"⬜ Calendar default", "value":""},
-                            {"label":"🍅 Tomato",          "value":"11"},
-                            {"label":"🌸 Flamingo",        "value":"4"},
-                            {"label":"🍊 Tangerine",       "value":"6"},
-                            {"label":"🍌 Banana",          "value":"5"},
-                            {"label":"🌿 Sage",            "value":"2"},
-                            {"label":"🌲 Basil",           "value":"10"},
-                            {"label":"🫐 Peacock",         "value":"7"},
-                            {"label":"🫐 Blueberry",       "value":"9"},
-                            {"label":"💜 Lavender",        "value":"1"},
-                            {"label":"🍇 Grape",           "value":"3"},
-                            {"label":"🩶 Graphite",        "value":"8"},
-                        ],
-                        value="",
+                        id={"type":"event-color","index":i},  # reuse id slot for cal_id
+                        options=_get_cal_options_cached(),
+                        value="primary",
                         clearable=False,
-                        style={"fontSize":"12px","width":"180px"},
+                        style={"fontSize":"12px","flex":"1"},
+                        placeholder="Select calendar...",
                     ),
                 ]),
                 html.P(ev.get("description",""),
@@ -3521,13 +3467,14 @@ def cb_add_all_events(n, events, dests, dates, starts, ends, colors_list, delete
         edit_date  = dates[i]       if i < len(dates)        else ev.get("date","")
         edit_start = starts[i]      if i < len(starts)       else ev.get("start_time","")
         edit_end   = ends[i]        if i < len(ends)         else ev.get("end_time","")
-        color_id   = colors_list[i] if i < len(colors_list)  else ""
+        # event-color slot now holds per-card calendar id
+        card_cal_id = colors_list[i] if i < len(colors_list) else None
+        cal_id_to_use = card_cal_id or selected_cal_id or "primary"
 
         merged = {**ev,
                   "date":       (edit_date  or "").strip() or ev.get("date",""),
                   "start_time": (edit_start or "").strip() or None,
-                  "end_time":   (edit_end   or "").strip() or None,
-                  "colorId":    color_id or None}
+                  "end_time":   (edit_end   or "").strip() or None}
 
         if dest == "task":
             tasks.append({
@@ -3540,7 +3487,7 @@ def cb_add_all_events(n, events, dests, dates, starts, ends, colors_list, delete
             next_id += 1
             task_added += 1
         else:
-            ok, err = create_calendar_event(merged, calendar_id=cal_id)
+            ok, err = create_calendar_event(merged, calendar_id=cal_id_to_use)
             if ok:
                 cal_success += 1
             else:
