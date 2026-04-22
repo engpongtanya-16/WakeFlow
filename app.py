@@ -2831,7 +2831,7 @@ def cb_manual_add_event(n, title, desc, location, meeting_link, date, start_raw,
         )
 
 
-# ── Planner calendar dropdown (load from Google Calendar) ─────────────────────
+# ── Planner calendar dropdown load from Google Calendar ─────────────────────
 @callback(
     Output("planner-topic-dropdown", "options"),
     Input("gcal-status-interval",    "n_intervals"),
