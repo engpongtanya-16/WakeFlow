@@ -251,7 +251,11 @@ def get_calendar_events(date_str: str) -> list:
                         teams_match = re.search(
                             r'https://teams\.microsoft\.com/l/meetup-join/[^\s<>"&]*', desc_text)
                         teams_link  = teams_match.group(0).rstrip(".,;") if teams_match else ""
-                        meet_link   = hang_link or zoom_link or teams_link
+                        # Also extract meet.google.com links from description
+                        gmeet_match = re.search(
+                            r'https://meet\.google\.com/[^\s<>"&]+', desc_text)
+                        gmeet_desc  = gmeet_match.group(0).rstrip(".,;") if gmeet_match else ""
+                        meet_link   = hang_link or gmeet_desc or zoom_link or teams_link
 
                         all_events.append({
                             "time":      t_start,
@@ -450,6 +454,56 @@ def create_calendar_event(event_data: dict, calendar_id: str = "primary") -> tup
         return False, err
 
 
+def update_calendar_event_by_title(title: str, date: str, meeting_link: str = "",
+                                    location: str = "", description: str = "") -> tuple[bool, str]:
+    """Find an event and update its meeting link, location, or description."""
+    if not GOOGLE_AVAILABLE or not os.path.exists(TOKEN_FILE):
+        return False, "Google Calendar not connected."
+    try:
+        import pytz
+        creds   = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
+        service = gapi_build("calendar", "v3", credentials=creds)
+
+        local_tz = pytz.timezone("Europe/Madrid")
+        day  = datetime.fromisoformat(date)
+        tmin = local_tz.localize(day.replace(hour=0,  minute=0,  second=0)).isoformat()
+        tmax = local_tz.localize(day.replace(hour=23, minute=59, second=59)).isoformat()
+
+        query_tokens = set(title.lower().split()) - {"the","a","an","with","for","at","on","in","of"}
+        cal_list = service.calendarList().list().execute()
+        updated  = []
+
+        for cal in cal_list.get("items", []):
+            cal_id = cal["id"]
+            events = service.events().list(
+                calendarId=cal_id, timeMin=tmin, timeMax=tmax,
+                singleEvents=True, orderBy="startTime"
+            ).execute()
+            for ev in events.get("items", []):
+                ev_tokens = set(ev.get("summary","").lower().split()) - {"the","a","an","with","for","at","on","in","of"}
+                if query_tokens & ev_tokens:
+                    patch = {}
+                    if location:
+                        patch["location"] = location
+                    if description or meeting_link:
+                        existing_desc = ev.get("description", "") or ""
+                        new_desc = description or ""
+                        if meeting_link:
+                            new_desc = (new_desc + "\n\n" if new_desc else "") + f"🔗 Join Meeting: {meeting_link}"
+                        if existing_desc and new_desc not in existing_desc:
+                            new_desc = existing_desc + "\n\n" + new_desc
+                        patch["description"] = new_desc.strip()
+                    if patch:
+                        service.events().patch(calendarId=cal_id, eventId=ev["id"], body=patch).execute()
+                        updated.append(ev.get("summary", title))
+
+        if updated:
+            return True, f"Updated: {', '.join(updated)}"
+        return False, f"No event matching '{title}' found on {date}."
+    except Exception as e:
+        return False, str(e)
+
+
 def find_calendar_id_by_name(name: str) -> str:
     """Look up a calendar's ID by partial name match. Returns 'primary' if not found."""
     if not name or not GOOGLE_AVAILABLE or not os.path.exists(TOKEN_FILE):
@@ -637,6 +691,29 @@ LLM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "update_calendar_event",
+            "description": (
+                "Update an existing calendar event — add a meeting link, change location, or update description. "
+                "Use this when the user wants to ADD a Zoom/Meet/Teams link to an existing event, "
+                "or update the location/description of an existing event. "
+                "Always call get_calendar_events first to get the exact event title."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title":        {"type":"string", "description":"Exact event title to find"},
+                    "date":         {"type":"string", "description":"Date YYYY-MM-DD"},
+                    "meeting_link": {"type":"string", "description":"Meeting URL to add (Zoom/Meet/Teams)"},
+                    "location":     {"type":"string", "description":"New location to set"},
+                    "description":  {"type":"string", "description":"New or additional description text"},
+                },
+                "required": ["title", "date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "add_task",
             "description": (
                 "Add a task or to-do item to the user's My Tasks list. "
@@ -696,6 +773,16 @@ def _run_tool(name: str, args: dict, city: str, topics: list) -> tuple[str, dict
     if name == "delete_calendar_event":
         ok, result = delete_calendar_event_by_title(
             args.get("title", ""), args.get("date", datetime.now().strftime("%Y-%m-%d"))
+        )
+        return json.dumps({"success": ok, "message": result}), None
+
+    if name == "update_calendar_event":
+        ok, result = update_calendar_event_by_title(
+            title=args.get("title", ""),
+            date=args.get("date", datetime.now().strftime("%Y-%m-%d")),
+            meeting_link=args.get("meeting_link", ""),
+            location=args.get("location", ""),
+            description=args.get("description", ""),
         )
         return json.dumps({"success": ok, "message": result}), None
 
