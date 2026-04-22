@@ -422,9 +422,28 @@ def create_calendar_event(event_data: dict, calendar_id: str = "primary") -> tup
         creds   = Credentials.from_authorized_user_file(TOKEN_FILE, GOOGLE_SCOPES)
         service = gapi_build("calendar", "v3", credentials=creds)
 
-        date       = event_data.get("date", datetime.now().strftime("%Y-%m-%d"))
-        start_time = event_data.get("start_time")
-        end_time   = event_data.get("end_time")
+        date       = (event_data.get("date") or "").strip() or datetime.now().strftime("%Y-%m-%d")
+        start_time = (event_data.get("start_time") or "").strip() or None
+        end_time   = (event_data.get("end_time")   or "").strip() or None
+
+        # Normalize time format (handle 16.35, 1635, 16:35)
+        def _norm(t):
+            if not t: return None
+            t = t.replace(".", ":").replace(",", ":")
+            if len(t) == 4 and t.isdigit():
+                t = t[:2] + ":" + t[2:]
+            parts = t.split(":")
+            if len(parts) == 2:
+                try:
+                    h, m = int(parts[0]), int(parts[1])
+                    if 0 <= h <= 23 and 0 <= m <= 59:
+                        return f"{h:02d}:{m:02d}"
+                except ValueError:
+                    pass
+            return None
+
+        start_time = _norm(start_time)
+        end_time   = _norm(end_time)
 
         if start_time:
             start = {"dateTime": f"{date}T{start_time}:00", "timeZone": "Europe/Madrid"}
@@ -435,8 +454,10 @@ def create_calendar_event(event_data: dict, calendar_id: str = "primary") -> tup
                 et  = st + timedelta(hours=1)
                 end = {"dateTime": et.strftime("%Y-%m-%dT%H:%M:00"), "timeZone": "Europe/Madrid"}
         else:
+            # All-day: end must be day AFTER start (Google Calendar API requirement)
+            next_day = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
             start = {"date": date}
-            end   = {"date": date}
+            end   = {"date": next_day}
 
         body = {"summary": event_data.get("title", "Imported Event"), "start": start, "end": end}
         if event_data.get("location"):
@@ -867,7 +888,7 @@ def _run_tool(name: str, args: dict, city: str, topics: list) -> tuple[str, dict
             "due_date": args.get("due_date") or None,
             "category": args.get("category", "todo"),
         }
-        return json.dumps({"success": True, "message": f"Task '{task['text']}' added to My Tasks."}), task
+        return json.dumps({"success": True, "message": f"Task '{task['text']}' is ready. I'll ask the user to confirm."}), {"type": "task", "data": task}
 
     return json.dumps({"error": f"Unknown tool: {name}"}), None
 
@@ -880,8 +901,8 @@ def chat_with_tools(history: list, city: str, topics: list) -> tuple[str, list]:
     from openai import OpenAI
     client   = OpenAI(api_key=OPENAI_API_KEY)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history]
-    pending_tasks  = []
-    pending_event  = None  # Only one pending create_calendar_event at a time
+    pending_event = None
+    pending_task  = None
 
     try:
         resp = client.chat.completions.create(
@@ -897,10 +918,11 @@ def chat_with_tools(history: list, city: str, topics: list) -> tuple[str, list]:
             for tc in msg.tool_calls:
                 args          = json.loads(tc.function.arguments)
                 result, extra = _run_tool(tc.function.name, args, city, topics)
-                if extra and tc.function.name == "add_task":
-                    pending_tasks.append(extra)
-                elif extra and tc.function.name == "create_calendar_event":
-                    pending_event = extra["data"]
+                if extra and isinstance(extra, dict):
+                    if extra.get("type") == "task":
+                        pending_task = extra["data"]
+                    elif extra.get("type") == "event":
+                        pending_event = extra["data"]
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             resp = client.chat.completions.create(
                 model="gpt-4o-mini", messages=messages,
@@ -908,9 +930,9 @@ def chat_with_tools(history: list, city: str, topics: list) -> tuple[str, list]:
             )
             msg = resp.choices[0].message
 
-        return msg.content or "Sorry, no response.", pending_tasks, pending_event
+        return msg.content or "Sorry, no response.", pending_event, pending_task
     except Exception as e:
-        return f"AI error: {e}", [], None
+        return f"AI error: {e}", None, None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1595,57 +1617,107 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
     dcc.Store(id="pending-event-store",    data=None),  # AI-created event waiting for calendar pick
 
     # ── Calendar Picker Modal (for AI create event) ───────────────────────
-    dbc.Modal(id="calendar-picker-modal", is_open=False, centered=True, children=[
-        dbc.ModalHeader(dbc.ModalTitle("📅 Choose Target Calendar")),
+    dbc.Modal(id="calendar-picker-modal", is_open=False, centered=True, size="lg", children=[
+        dbc.ModalHeader(dbc.ModalTitle("📅 Add Event to Google Calendar")),
         dbc.ModalBody([
-            html.P("Review and edit your event before adding:",
-                   style={"color":"#64748b","fontSize":"13px","marginBottom":"12px"}),
-
-            # Editable title
-            dbc.Label("Event Title", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+            html.P("Review and complete your event details before adding:",
+                   style={"color":"#64748b","fontSize":"13px","marginBottom":"14px"}),
+            dbc.Label("Event Title *", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
             dbc.Input(id="modal-event-title", type="text", size="sm",
                       className="mb-2", style={"fontSize":"13px"}),
-
-            # Date + time row
-            dbc.Row(className="g-2 mb-2", children=[
+            dbc.Label("Description (optional)", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+            dbc.Textarea(id="modal-event-desc", size="sm", rows=2,
+                         className="mb-2", style={"fontSize":"13px","resize":"none"}),
+            dbc.Label("📍 Location (optional)", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+            dbc.Input(id="modal-event-location", type="text", size="sm",
+                      placeholder="e.g. BCN Airport, ESADE Barcelona",
+                      className="mb-2", style={"fontSize":"13px"}),
+            dbc.Label("🔗 Meeting link (optional)", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+            dbc.Input(id="modal-event-meeting-link", type="url", size="sm",
+                      placeholder="Zoom / Google Meet / Teams URL",
+                      className="mb-2", style={"fontSize":"13px"}),
+            dbc.Row(className="g-2 mb-1", children=[
                 dbc.Col(width=5, children=[
-                    dbc.Label("📆 Date", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+                    dbc.Label("📆 Date *", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
                     dbc.Input(id="modal-event-date", type="text",
-                              placeholder="YYYY-MM-DD", size="sm",
-                              style={"fontSize":"12px"}),
+                              placeholder="YYYY-MM-DD", size="sm", style={"fontSize":"12px"}),
                 ]),
                 dbc.Col(width=3, children=[
                     dbc.Label("🕐 Start", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
                     dbc.Input(id="modal-event-start", type="text",
-                              placeholder="HH:MM", size="sm",
-                              style={"fontSize":"12px"}),
+                              placeholder="HH:MM", size="sm", style={"fontSize":"12px"}),
                 ]),
                 dbc.Col(width=3, children=[
                     dbc.Label("🕑 End", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
                     dbc.Input(id="modal-event-end", type="text",
-                              placeholder="HH:MM", size="sm",
-                              style={"fontSize":"12px"}),
+                              placeholder="HH:MM", size="sm", style={"fontSize":"12px"}),
                 ]),
             ]),
-            html.Small("Leave time blank = All day",
-                       style={"color":"#94a3b8","fontSize":"11px","display":"block","marginBottom":"12px"}),
-
-            # Calendar dropdown
-            dbc.Label("Target Calendar", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
-            dcc.Dropdown(
-                id="calendar-picker-dropdown",
-                options=[{"label":"📅 Primary Calendar","value":"primary"}],
-                value="primary",
-                clearable=False,
-                style={"fontSize":"13px"},
-            ),
-            html.Div(id="calendar-picker-event-preview"),  # kept for compatibility
+            html.Small("Leave time blank = All day event",
+                       style={"color":"#94a3b8","fontSize":"11px","display":"block","marginBottom":"10px"}),
+            dbc.Row(className="g-2 mb-1", children=[
+                dbc.Col(width=7, children=[
+                    dbc.Label("Target Calendar", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+                    dcc.Dropdown(id="calendar-picker-dropdown",
+                                 options=[{"label":"📅 Primary Calendar","value":"primary"}],
+                                 value="primary", clearable=False, style={"fontSize":"13px"}),
+                ]),
+                dbc.Col(width=5, children=[
+                    dbc.Label("🎨 Color", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+                    dcc.Dropdown(id="modal-event-color",
+                                 options=[
+                                     {"label":"⬜ Default","value":""},
+                                     {"label":"🍅 Tomato","value":"11"},
+                                     {"label":"🌸 Flamingo","value":"4"},
+                                     {"label":"🍊 Tangerine","value":"6"},
+                                     {"label":"🍌 Banana","value":"5"},
+                                     {"label":"🌿 Sage","value":"2"},
+                                     {"label":"🌲 Basil","value":"10"},
+                                     {"label":"🫐 Peacock","value":"7"},
+                                     {"label":"🫐 Blueberry","value":"9"},
+                                     {"label":"💜 Lavender","value":"1"},
+                                     {"label":"🍇 Grape","value":"3"},
+                                     {"label":"🩶 Graphite","value":"8"},
+                                 ],
+                                 value="", clearable=False, style={"fontSize":"12px"}),
+                ]),
+            ]),
+            html.Div(id="calendar-picker-event-preview"),
         ]),
         dbc.ModalFooter([
-            dbc.Button("✕ Cancel", id="calendar-picker-cancel",
-                       color="secondary", size="sm", n_clicks=0),
-            dbc.Button("➕ Add Event", id="calendar-picker-confirm",
-                       color="success", size="sm", n_clicks=0),
+            dbc.Button("✕ Cancel",    id="calendar-picker-cancel",  color="secondary", size="sm", n_clicks=0),
+            dbc.Button("➕ Add Event", id="calendar-picker-confirm", color="success",   size="sm", n_clicks=0),
+        ]),
+    ]),
+
+    # ── Task Picker Modal ─────────────────────────────────────────────────
+    dcc.Store(id="pending-task-store", data=None),
+    dbc.Modal(id="task-picker-modal", is_open=False, centered=True, children=[
+        dbc.ModalHeader(dbc.ModalTitle("✅ Add to My Tasks")),
+        dbc.ModalBody([
+            html.P("Review and complete your task details:",
+                   style={"color":"#64748b","fontSize":"13px","marginBottom":"14px"}),
+            dbc.Label("Task *", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+            dbc.Input(id="modal-task-text", type="text", size="sm",
+                      className="mb-2", style={"fontSize":"13px"}),
+            dbc.Label("Category", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+            dcc.Dropdown(id="modal-task-category",
+                         options=[
+                             {"label":"📋 To-Do",     "value":"todo"},
+                             {"label":"📚 Assignment", "value":"assignment"},
+                             {"label":"💼 Work",       "value":"work"},
+                             {"label":"🏠 Personal",   "value":"personal"},
+                         ],
+                         value="todo", clearable=False,
+                         style={"fontSize":"13px","marginBottom":"10px"}),
+            dbc.Label("📅 Due Date (optional)", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+            dcc.DatePickerSingle(id="modal-task-due", placeholder="No due date",
+                                 display_format="D MMM YYYY", clearable=True,
+                                 style={"fontSize":"12px"}),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("✕ Cancel",   id="task-picker-cancel",  color="secondary", size="sm", n_clicks=0),
+            dbc.Button("✅ Add Task", id="task-picker-confirm", color="warning",   size="sm", n_clicks=0),
         ]),
     ]),
 
@@ -2475,7 +2547,6 @@ def cb_show_map(n, loc_data):
     Output("chat-window",                   "children"),
     Output("chat-store",                    "data"),
     Output("chat-input",                    "value"),
-    Output("task-store",                    "data", allow_duplicate=True),
     Output("pending-event-store",           "data"),
     Output("calendar-picker-modal",         "is_open"),
     Output("calendar-picker-event-preview", "children"),
@@ -2483,24 +2554,26 @@ def cb_show_map(n, loc_data):
     Output("modal-event-date",              "value"),
     Output("modal-event-start",             "value"),
     Output("modal-event-end",               "value"),
+    Output("pending-task-store",            "data"),
+    Output("task-picker-modal",             "is_open"),
+    Output("modal-task-text",               "value"),
+    Output("modal-task-category",           "value"),
     Input("send-btn",      "n_clicks"),
     Input("chat-input",    "n_submit"),
     State("chat-input",    "value"),
     State("chat-store",    "data"),
     State("city-store",    "data"),
     State("topics-check",  "value"),
-    State("task-store",    "data"),
     prevent_initial_call=True,
 )
-def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
+def cb_chat(n_clicks, n_submit, user_text, history, city, topics):
     user_text = user_text or ""
     if not user_text.strip():
-        return (no_update,) * 11
+        return (no_update,) * 14
 
     city    = city    or "Barcelona"
     topics  = topics  or ["Tech","Finance"]
     history = history or []
-    tasks   = tasks   or []
 
     bubbles = [_bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
                            "I'll check your calendar, weather, and news automatically.")]
@@ -2515,15 +2588,8 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
     enriched  = f"[TODAY: {today_tag}] [CITY: {city}] [TOPICS: {', '.join(topics)}] {user_text}"
     history.append({"role": "user", "content": enriched})
 
-    reply, pending_tasks, pending_event = chat_with_tools(history, city, topics)
+    reply, pending_event, pending_task = chat_with_tools(history, city, topics)
     history.append({"role": "assistant", "content": reply})
-
-    next_id = max((t["id"] for t in tasks), default=-1) + 1
-    for pt in pending_tasks:
-        tasks.append({"id": next_id, "text": pt["text"],
-                      "category": pt.get("category","todo"), "done": False,
-                      "due": pt.get("due_date") or None})
-        next_id += 1
 
     for m in history:
         if m["role"] == "user":
@@ -2532,18 +2598,32 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
         elif m["role"] == "assistant":
             bubbles.append(_bubble_ai(m["content"]))
 
+    # Open event modal
     if pending_event:
         ev = pending_event
         return (
-            bubbles, history, "", tasks,
-            pending_event, True, html.Div(),   # modal open, preview placeholder
-            ev.get("title", ""),
-            ev.get("date", ""),
-            ev.get("start_time", "") or "",
-            ev.get("end_time", "")   or "",
+            bubbles, history, "",
+            pending_event, True, html.Div(),
+            ev.get("title", ""), ev.get("date", ""),
+            ev.get("start_time", "") or "", ev.get("end_time", "") or "",
+            no_update, False, no_update, no_update,
         )
 
-    return bubbles, history, "", tasks, None, False, no_update, no_update, no_update, no_update, no_update
+    # Open task modal
+    if pending_task:
+        pt = pending_task
+        return (
+            bubbles, history, "",
+            no_update, False, no_update,
+            no_update, no_update, no_update, no_update,
+            pending_task, True,
+            pt.get("text", ""), pt.get("category", "todo"),
+        )
+
+    return (bubbles, history, "",
+            None, False, no_update,
+            no_update, no_update, no_update, no_update,
+            None, False, no_update, no_update)
 
 
 # ── Calendar Picker Modal Callbacks ───────────────────────────────────────────
@@ -2575,26 +2655,41 @@ def cb_load_picker_calendars(is_open):
     State("pending-event-store",      "data"),
     State("calendar-picker-dropdown", "value"),
     State("modal-event-title",        "value"),
+    State("modal-event-desc",         "value"),
+    State("modal-event-location",     "value"),
+    State("modal-event-meeting-link", "value"),
     State("modal-event-date",         "value"),
     State("modal-event-start",        "value"),
     State("modal-event-end",          "value"),
+    State("modal-event-color",        "value"),
     State("chat-store",               "data"),
     prevent_initial_call=True,
 )
 def cb_calendar_picker_action(confirm_clicks, cancel_clicks, pending_event,
-                               cal_id, edit_title, edit_date, edit_start, edit_end, history):
+                               cal_id, edit_title, edit_desc, edit_location,
+                               edit_meeting_link, edit_date, edit_start, edit_end,
+                               edit_color, history):
     triggered = ctx.triggered_id
     if triggered == "calendar-picker-cancel" or not pending_event:
         return False, no_update
 
-    # Merge user edits into the event
     cal_id = cal_id or "primary"
+
+    # Build description with meeting link appended if provided
+    desc = (edit_desc or "").strip()
+    link = (edit_meeting_link or "").strip()
+    if link:
+        desc = (desc + "\n\n" if desc else "") + f"🔗 Join Meeting: {link}"
+
     merged = {
         **pending_event,
-        "title":      (edit_title  or "").strip() or pending_event.get("title", "New Event"),
-        "date":       (edit_date   or "").strip() or pending_event.get("date", ""),
-        "start_time": (edit_start  or "").strip() or None,
-        "end_time":   (edit_end    or "").strip() or None,
+        "title":       (edit_title    or "").strip() or pending_event.get("title", "New Event"),
+        "date":        (edit_date     or "").strip() or pending_event.get("date", ""),
+        "start_time":  (edit_start    or "").strip() or None,
+        "end_time":    (edit_end      or "").strip() or None,
+        "description": desc or pending_event.get("description") or None,
+        "location":    (edit_location or "").strip() or pending_event.get("location") or None,
+        "colorId":     edit_color or None,
     }
 
     ok, result = create_calendar_event(merged, calendar_id=cal_id)
@@ -2619,6 +2714,50 @@ def cb_calendar_picker_action(confirm_clicks, cancel_clicks, pending_event,
         bubbles.append(_bubble_ai(f"❌ Could not add event: {result}"))
 
     return False, bubbles
+
+
+@callback(
+    Output("task-picker-modal",  "is_open", allow_duplicate=True),
+    Output("task-store",         "data", allow_duplicate=True),
+    Output("chat-window",        "children", allow_duplicate=True),
+    Input("task-picker-confirm", "n_clicks"),
+    Input("task-picker-cancel",  "n_clicks"),
+    State("pending-task-store",  "data"),
+    State("modal-task-text",     "value"),
+    State("modal-task-category", "value"),
+    State("modal-task-due",      "date"),
+    State("task-store",          "data"),
+    State("chat-store",          "data"),
+    prevent_initial_call=True,
+)
+def cb_task_picker_action(confirm_clicks, cancel_clicks, pending_task,
+                           text, category, due_date, tasks, history):
+    triggered = ctx.triggered_id
+    if triggered == "task-picker-cancel" or not pending_task:
+        return False, no_update, no_update
+
+    tasks   = tasks or []
+    next_id = max((t["id"] for t in tasks), default=-1) + 1
+    task_text = (text or "").strip() or pending_task.get("text", "New Task")
+    tasks.append({
+        "id":       next_id,
+        "text":     task_text,
+        "category": category or pending_task.get("category", "todo"),
+        "done":     False,
+        "due":      due_date or pending_task.get("due_date") or None,
+    })
+
+    bubbles = [_bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
+                           "I'll check your calendar, weather, and news automatically.")]
+    for m in (history or []):
+        if m["role"] == "user":
+            display = m["content"].split("] ")[-1] if "] " in m["content"] else m["content"]
+            bubbles.append(_bubble_user(display))
+        elif m["role"] == "assistant":
+            bubbles.append(_bubble_ai(m["content"]))
+    bubbles.append(_bubble_ai(f"✅ Task **{task_text}** added to My Tasks!"))
+
+    return False, tasks, bubbles
 def _normalize_time(t: str) -> str | None:
     """Convert various time formats (16.35, 1635, 16:35) → '16:35', or None if blank."""
     if not t:
