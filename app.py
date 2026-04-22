@@ -1598,9 +1598,40 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
     dbc.Modal(id="calendar-picker-modal", is_open=False, centered=True, children=[
         dbc.ModalHeader(dbc.ModalTitle("📅 Choose Target Calendar")),
         dbc.ModalBody([
-            html.P("Which calendar should this event be added to?",
+            html.P("Review and edit your event before adding:",
                    style={"color":"#64748b","fontSize":"13px","marginBottom":"12px"}),
-            html.Div(id="calendar-picker-event-preview", className="mb-3"),
+
+            # Editable title
+            dbc.Label("Event Title", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+            dbc.Input(id="modal-event-title", type="text", size="sm",
+                      className="mb-2", style={"fontSize":"13px"}),
+
+            # Date + time row
+            dbc.Row(className="g-2 mb-2", children=[
+                dbc.Col(width=5, children=[
+                    dbc.Label("📆 Date", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+                    dbc.Input(id="modal-event-date", type="text",
+                              placeholder="YYYY-MM-DD", size="sm",
+                              style={"fontSize":"12px"}),
+                ]),
+                dbc.Col(width=3, children=[
+                    dbc.Label("🕐 Start", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+                    dbc.Input(id="modal-event-start", type="text",
+                              placeholder="HH:MM", size="sm",
+                              style={"fontSize":"12px"}),
+                ]),
+                dbc.Col(width=3, children=[
+                    dbc.Label("🕑 End", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
+                    dbc.Input(id="modal-event-end", type="text",
+                              placeholder="HH:MM", size="sm",
+                              style={"fontSize":"12px"}),
+                ]),
+            ]),
+            html.Small("Leave time blank = All day",
+                       style={"color":"#94a3b8","fontSize":"11px","display":"block","marginBottom":"12px"}),
+
+            # Calendar dropdown
+            dbc.Label("Target Calendar", style={"fontWeight":"600","fontSize":"12px","color":"#374151"}),
             dcc.Dropdown(
                 id="calendar-picker-dropdown",
                 options=[{"label":"📅 Primary Calendar","value":"primary"}],
@@ -1608,6 +1639,7 @@ app.layout = dbc.Container(fluid=True, className="wf-root", children=[
                 clearable=False,
                 style={"fontSize":"13px"},
             ),
+            html.Div(id="calendar-picker-event-preview"),  # kept for compatibility
         ]),
         dbc.ModalFooter([
             dbc.Button("✕ Cancel", id="calendar-picker-cancel",
@@ -2447,6 +2479,10 @@ def cb_show_map(n, loc_data):
     Output("pending-event-store",           "data"),
     Output("calendar-picker-modal",         "is_open"),
     Output("calendar-picker-event-preview", "children"),
+    Output("modal-event-title",             "value"),
+    Output("modal-event-date",              "value"),
+    Output("modal-event-start",             "value"),
+    Output("modal-event-end",               "value"),
     Input("send-btn",      "n_clicks"),
     Input("chat-input",    "n_submit"),
     State("chat-input",    "value"),
@@ -2459,7 +2495,7 @@ def cb_show_map(n, loc_data):
 def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
     user_text = user_text or ""
     if not user_text.strip():
-        return no_update, no_update, no_update, no_update, no_update, no_update, no_update
+        return (no_update,) * 11
 
     city    = city    or "Barcelona"
     topics  = topics  or ["Tech","Finance"]
@@ -2498,21 +2534,16 @@ def cb_chat(n_clicks, n_submit, user_text, history, city, topics, tasks):
 
     if pending_event:
         ev = pending_event
-        time_str = (f"{ev.get('start_time','')} – {ev.get('end_time','')}"
-                    if ev.get("start_time") else "All day")
-        preview = html.Div([
-            html.Strong(ev.get("title",""), style={"color":"#1e293b","fontSize":"14px","display":"block"}),
-            html.Div(className="d-flex gap-2 mt-1 flex-wrap", children=[
-                dbc.Badge(ev.get("date",""), color="primary"),
-                dbc.Badge(time_str, color="secondary"),
-            ]),
-            html.P(ev.get("description",""),
-                   style={"color":"#64748b","fontSize":"12px","margin":"6px 0 0"})
-            if ev.get("description") else html.Div(),
-        ], style={"background":"#f8fafc","borderRadius":"8px","padding":"10px"})
-        return bubbles, history, "", tasks, pending_event, True, preview
+        return (
+            bubbles, history, "", tasks,
+            pending_event, True, html.Div(),   # modal open, preview placeholder
+            ev.get("title", ""),
+            ev.get("date", ""),
+            ev.get("start_time", "") or "",
+            ev.get("end_time", "")   or "",
+        )
 
-    return bubbles, history, "", tasks, None, False, no_update
+    return bubbles, history, "", tasks, None, False, no_update, no_update, no_update, no_update, no_update
 
 
 # ── Calendar Picker Modal Callbacks ───────────────────────────────────────────
@@ -2541,21 +2572,33 @@ def cb_load_picker_calendars(is_open):
     Output("chat-window",            "children", allow_duplicate=True),
     Input("calendar-picker-confirm", "n_clicks"),
     Input("calendar-picker-cancel",  "n_clicks"),
-    State("pending-event-store",     "data"),
-    State("calendar-picker-dropdown","value"),
-    State("chat-store",              "data"),
+    State("pending-event-store",      "data"),
+    State("calendar-picker-dropdown", "value"),
+    State("modal-event-title",        "value"),
+    State("modal-event-date",         "value"),
+    State("modal-event-start",        "value"),
+    State("modal-event-end",          "value"),
+    State("chat-store",               "data"),
     prevent_initial_call=True,
 )
-def cb_calendar_picker_action(confirm_clicks, cancel_clicks, pending_event, cal_id, history):
+def cb_calendar_picker_action(confirm_clicks, cancel_clicks, pending_event,
+                               cal_id, edit_title, edit_date, edit_start, edit_end, history):
     triggered = ctx.triggered_id
     if triggered == "calendar-picker-cancel" or not pending_event:
         return False, no_update
 
-    # User confirmed — create the event
+    # Merge user edits into the event
     cal_id = cal_id or "primary"
-    ok, result = create_calendar_event(pending_event, calendar_id=cal_id)
+    merged = {
+        **pending_event,
+        "title":      (edit_title  or "").strip() or pending_event.get("title", "New Event"),
+        "date":       (edit_date   or "").strip() or pending_event.get("date", ""),
+        "start_time": (edit_start  or "").strip() or None,
+        "end_time":   (edit_end    or "").strip() or None,
+    }
 
-    # Rebuild chat bubbles and add confirmation bubble
+    ok, result = create_calendar_event(merged, calendar_id=cal_id)
+
     bubbles = [_bubble_ai("Hey! I'm WakeFlow 👋 Ask me anything — "
                            "I'll check your calendar, weather, and news automatically.")]
     for m in (history or []):
@@ -2566,10 +2609,11 @@ def cb_calendar_picker_action(confirm_clicks, cancel_clicks, pending_event, cal_
             bubbles.append(_bubble_ai(m["content"]))
 
     if ok:
-        ev = pending_event
+        time_str = (f"{merged['start_time']} – {merged['end_time']}"
+                    if merged.get("start_time") else "All day")
         bubbles.append(_bubble_ai(
-            f"✅ '{ev.get('title')}' added to your calendar on {ev.get('date')}! "
-            "Refresh My Day to see it. 📅"
+            f"✅ **{merged['title']}** added on {merged['date']} ({time_str}). "
+            "Refresh My Day to see it! 📅"
         ))
     else:
         bubbles.append(_bubble_ai(f"❌ Could not add event: {result}"))
